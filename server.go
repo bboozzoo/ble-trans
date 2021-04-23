@@ -23,6 +23,18 @@ const (
 	descrHandle = "3000"
 )
 
+func runServer(devName string) error {
+	app, err := NewServer(devName)
+	if err != nil {
+		return err
+	}
+	// XXX: detect ctrl-c and app.Close() ?
+	return app.Run()
+}
+	
+
+	
+
 type Server struct {
 	app *service.App
 }
@@ -52,7 +64,7 @@ func NewServer(devName string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtime.SetFinalizer(app, app.Close)
+	runtime.SetFinalizer(app, func(x *service.App) {x.Close()})
 	app.SetName(appName)
 
 	if !app.Adapter().Properties.Powered {
@@ -119,3 +131,4 @@ func (s *Server) onRead(c *service.Char, options map[string]interface{}) ([]byte
 func (s *Server) onWrite(c *service.Char, value []byte) ([]byte, error) {
 	return nil, nil
 }
+
