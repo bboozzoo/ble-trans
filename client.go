@@ -190,6 +190,7 @@ func retrieveServices(a *adapter.Adapter1, dev *device.Device1) error {
 	}
 
 	if len(list) == 0 {
+		log.Debug("got nothing try again")
 		time.Sleep(time.Second * 2)
 		return retrieveServices(a, dev)
 	}

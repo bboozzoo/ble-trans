@@ -1,8 +1,8 @@
 package main
 
 import (
-	"runtime"
 	"fmt"
+	"runtime"
 
 	"github.com/muka/go-bluetooth/api/service"
 	"github.com/muka/go-bluetooth/bluez/profile/agent"
@@ -16,9 +16,9 @@ const (
 	//                        12634d89-d598-4874-8e86-7d042ee07ba
 	OnboardingServiceUUID = "1234-0000-1000-8000-00805F9B34FB"
 
-        // XXX: are there better ones?
-        serviceHandle  = "1000"
-        commCharHandle = "2000"
+	// XXX: are there better ones?
+	serviceHandle  = "1000"
+	commCharHandle = "2000"
 
 	descrString = "Communication for snapd onboarding"
 	descrHandle = "3000"
@@ -34,7 +34,8 @@ func runServer(devName string) error {
 }
 
 type Server struct {
-	app *service.App
+	app     *service.App
+	readCnt int
 }
 
 // NewServer creates a new ble server that advertises itself.
@@ -63,7 +64,7 @@ func NewServer(devName string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtime.SetFinalizer(app, func(x *service.App) {x.Close()})
+	runtime.SetFinalizer(app, func(x *service.App) { x.Close() })
 	app.SetName(appName)
 
 	if !app.Adapter().Properties.Powered {
@@ -71,7 +72,9 @@ func NewServer(devName string) (*Server, error) {
 			return nil, err
 		}
 	}
-	server := &Server{app: app}
+	server := &Server{
+		app: app,
+	}
 
 	// add communication characteristic
 	service1, err := app.NewService(serviceHandle)
@@ -104,7 +107,8 @@ func NewServer(devName string) (*Server, error) {
 		gatt.FlagDescriptorRead,
 	}
 	descr.OnRead(service.DescrReadCallback(func(c *service.Descr, options map[string]interface{}) ([]byte, error) {
-		return []byte(descrString), nil
+		server.readCnt++
+		return []byte(fmt.Sprintf("%s read: %v", descrString, server.readCnt)), nil
 	}))
 	if err = commChar.AddDescr(descr); err != nil {
 		return nil, err
@@ -113,7 +117,7 @@ func NewServer(devName string) (*Server, error) {
 }
 
 func (s *Server) Run() error {
-	if err:= s.app.Run(); err != nil {
+	if err := s.app.Run(); err != nil {
 		return err
 	}
 
@@ -125,7 +129,7 @@ func (s *Server) Run() error {
 	defer cancel()
 
 	select {}
-	
+
 	return nil
 }
 
@@ -143,4 +147,3 @@ func (s *Server) onRead(c *service.Char, options map[string]interface{}) ([]byte
 func (s *Server) onWrite(c *service.Char, value []byte) ([]byte, error) {
 	return nil, nil
 }
-
