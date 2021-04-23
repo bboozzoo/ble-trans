@@ -14,6 +14,19 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const snapdOnboardingService = "00001234-0000-1000-8000-00805F9B34FB"
+const someService = "0000fe9f-0000-1000-8000-00805f9b34fb"
+
+func hasUUID(uuids []string, uuid string) bool {
+	for _, u := range uuids {
+		log.Infof("checking UUID %v", u)
+		if u == snapdOnboardingService {
+			return true
+		}
+	}
+	return false
+}
+
 func client(adapterID, hwaddr string) (err error) {
 	log.SetLevel(log.TraceLevel)
 	log.Infof("Discovering %s on %s", hwaddr, adapterID)
@@ -62,8 +75,20 @@ func client(adapterID, hwaddr string) (err error) {
 	if err != nil {
 		return err
 	}
-	log.Infof("UUIDs: %v", uuids)
-	char, err := dev.GetCharByUUID("12341000-0000-1000-8000-00805f9b34fb")
+	found := false
+	for _, u := range uuids {
+		log.Infof("found service %v", u)
+		if u == snapdOnboardingService {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("service %v not found in device %v", snapdOnboardingService, hwaddr)
+	}
+	// service UUIDs
+	log.Infof("service UUIDs: %v", uuids)
+	char, err := dev.GetCharByUUID("00003000-0000-1000-8000-00805f9b34fb")
 	if err != nil {
 		return err
 	}
@@ -77,7 +102,7 @@ func client(adapterID, hwaddr string) (err error) {
 		time.Sleep(5 * time.Second)
 	}
 
-	retrieveServices(a, dev)
+	// retrieveServices(a, dev)
 
 	select {}
 	// return nil
@@ -124,9 +149,12 @@ func discover(a *adapter.Adapter1, hwaddr string) (*device.Device1, error) {
 		return nil, err
 	}
 
-	discovery, cancel, err := api.Discover(a, nil)
+	discovery, cancel, err := api.Discover(a, &adapter.DiscoveryFilter{
+		UUIDs:     []string{snapdOnboardingService},
+		Transport: adapter.DiscoveryFilterTransportLE,
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot run discovery: %v", err)
 	}
 
 	defer cancel()
@@ -149,11 +177,6 @@ func discover(a *adapter.Adapter1, hwaddr string) (*device.Device1, error) {
 			n = p.Name
 		}
 		log.Debugf("Discovered (%s) %s", n, p.Address)
-
-		if p.Address != hwaddr {
-			continue
-		}
-
 		return dev, nil
 	}
 
