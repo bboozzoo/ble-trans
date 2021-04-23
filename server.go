@@ -2,7 +2,7 @@ package main
 
 import (
 	"runtime"
-	"strings"
+	"fmt"
 
 	"github.com/muka/go-bluetooth/api/service"
 	"github.com/muka/go-bluetooth/bluez/profile/agent"
@@ -13,11 +13,12 @@ const (
 	appName = "snapd onboarding"
 
 	//                               -0000-1000-8000-00805F9B34FB
-	OnboardingServiceUUID = "2d06923d-c853-4d90-a8a9-91731cdefcfb"
+	//                        12634d89-d598-4874-8e86-7d042ee07ba
+	OnboardingServiceUUID = "1234-0000-1000-8000-00805F9B34FB"
 
-	// XXX: are there better ones?
-	serviceHandle  = "1000"
-	commCharHandle = "2000"
+        // XXX: are there better ones?
+        serviceHandle  = "1000"
+        commCharHandle = "2000"
 
 	descrString = "Communication for snapd onboarding"
 	descrHandle = "3000"
@@ -31,9 +32,6 @@ func runServer(devName string) error {
 	// XXX: detect ctrl-c and app.Close() ?
 	return app.Run()
 }
-	
-
-	
 
 type Server struct {
 	app *service.App
@@ -47,9 +45,10 @@ type Server struct {
 // managed objects under org.bluez and finding the ones that implement
 // org.bluez.GattManager1.
 func NewServer(devName string) (*Server, error) {
-	l := strings.SplitN(OnboardingServiceUUID, "-", 2)
-	uuidPrefix := l[0]
-	uuidSuffix := l[1]
+	uuidPrefix := "1234"
+	uuidSuffix := "-0000-1000-8000-00805F9B34FB"
+	fmt.Println(uuidPrefix)
+	fmt.Println(uuidSuffix)
 
 	// create bluetooth "app" that advertises itself
 	options := service.AppOptions{
@@ -58,7 +57,7 @@ func NewServer(devName string) (*Server, error) {
 		// XXX: could we simply pass the fully uuid here instead of
 		// this strange dance?
 		UUIDSuffix: uuidSuffix,
-		UUID:       uuidPrefix,
+		UUID:       "1234",
 	}
 	app, err := service.NewApp(options)
 	if err != nil {
@@ -114,7 +113,20 @@ func NewServer(devName string) (*Server, error) {
 }
 
 func (s *Server) Run() error {
-	return s.app.Run()
+	if err:= s.app.Run(); err != nil {
+		return err
+	}
+
+	// 0 means no timeout
+	cancel, err := s.app.Advertise(0)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
+	select {}
+	
+	return nil
 }
 
 func (s *Server) Close() error {
