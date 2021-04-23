@@ -1,16 +1,15 @@
 package main
 
 import (
-	"os"
 	"fmt"
+	"os"
 )
-
 
 func main() {
 	// XXX: use proper cmdline parser
 	what := "server"
 	iface := "hci0"
-	
+
 	if len(os.Args) > 1 {
 		what = os.Args[1]
 	}
@@ -20,6 +19,7 @@ func main() {
 	case "server":
 		err = runServer(iface)
 	case "client":
+		err = client(iface, "B8:27:EB:6F:C1:30")
 		//err = runClient(iface)
 		err = fmt.Errorf("client not implemented yet")
 	default:
