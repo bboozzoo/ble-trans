@@ -58,6 +58,25 @@ func client(adapterID, hwaddr string) (err error) {
 		return err
 	}
 
+	uuids, err := dev.GetUUIDs()
+	if err != nil {
+		return err
+	}
+	log.Infof("UUIDs: %v", uuids)
+	char, err := dev.GetCharByUUID("12341000-0000-1000-8000-00805f9b34fb")
+	if err != nil {
+		return err
+	}
+	for {
+		v, err := char.ReadValue(nil)
+		if err != nil {
+			return err
+		}
+		log.Infof("value: %x", v)
+		log.Infof("       %s", string(v))
+		time.Sleep(5 * time.Second)
+	}
+
 	retrieveServices(a, dev)
 
 	select {}

@@ -20,8 +20,6 @@ func main() {
 		err = runServer(iface)
 	case "client":
 		err = client(iface, "B8:27:EB:6F:C1:30")
-		//err = runClient(iface)
-		err = fmt.Errorf("client not implemented yet")
 	default:
 		err = fmt.Errorf("unknown action %q: try client/server", what)
 	}
