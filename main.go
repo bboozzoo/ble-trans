@@ -3,9 +3,16 @@ package main
 import (
 	"fmt"
 	"os"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func main() {
+	log.SetLevel(log.TraceLevel)
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
+
 	// XXX: use proper cmdline parser
 	what := "server"
 	iface := "hci0"

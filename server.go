@@ -13,12 +13,13 @@ import (
 const (
 	appName = "snapd onboarding"
 
-	OnboardingServiceUUID = "12341000-d598-4874-8e86-7d042ee07ba"
-	UUIDBase              = "1234"
-	UUIDSuffix            = "-d598-4874-8e86-7d042ee07ba"
+	UUIDBase   = "1234"
+	UUIDSuffix = "-0000-1000-8000-00805f9b34fb"
+	//UUIDSuffix            = "-d598-4874-8e86-7d042ee07ba"
 	serviceHandle         = "1000"
 	commCharHandle        = "2000"
 	descrHandle           = "3000"
+	OnboardingServiceUUID = UUIDBase + serviceHandle + UUIDSuffix
 	descrString           = "Communication for snapd onboarding"
 )
 
