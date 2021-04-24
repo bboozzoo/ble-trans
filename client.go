@@ -14,13 +14,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const snapdOnboardingService = "00001234-0000-1000-8000-00805F9B34FB"
-const someService = "0000fe9f-0000-1000-8000-00805f9b34fb"
-
 func hasUUID(uuids []string, uuid string) bool {
 	for _, u := range uuids {
 		log.Infof("checking UUID %v", u)
-		if u == snapdOnboardingService {
+		if u == OnboardingServiceUUID {
 			return true
 		}
 	}
@@ -78,17 +75,25 @@ func client(adapterID, hwaddr string) (err error) {
 	found := false
 	for _, u := range uuids {
 		log.Infof("found service %v", u)
-		if u == snapdOnboardingService {
+		if u == OnboardingServiceUUID {
 			found = true
 			break
 		}
 	}
 	if !found {
-		return fmt.Errorf("service %v not found in device %v", snapdOnboardingService, hwaddr)
+		return fmt.Errorf("service %v not found in device %v",
+			OnboardingServiceUUID, hwaddr)
 	}
-	// service UUIDs
-	log.Infof("service UUIDs: %v", uuids)
-	char, err := dev.GetCharByUUID("00003000-0000-1000-8000-00805f9b34fb")
+	log.Debugf("props: %+v", dev.Properties)
+	chars, err := dev.GetCharacteristics()
+	if err != nil {
+		return fmt.Errorf("cannot get characteristics: %v", err)
+	}
+	for _, c := range chars {
+		_, u := c.GetUUID()
+		log.Debugf("characteristic UUID: %v", u)
+	}
+	char, err := dev.GetCharByUUID("12342000-0000-1000-8000-00805f9b34fb")
 	if err != nil {
 		return err
 	}
@@ -109,25 +114,28 @@ func client(adapterID, hwaddr string) (err error) {
 }
 
 func findDevice(a *adapter.Adapter1, hwaddr string) (*device.Device1, error) {
-	//
+
+	// do we have a cached device?
 	// devices, err := a.GetDevices()
 	// if err != nil {
 	// 	return nil, err
 	// }
-	//
+
+	// if len(devices) == 0 {
+	// 	log.Infof("no cached devices")
+	// }
 	// for _, dev := range devices {
-	// 	devProps, err := dev.GetProperties()
+	// 	p, err := dev.GetProperties()
 	// 	if err != nil {
 	// 		log.Errorf("Failed to load dev props: %s", err)
 	// 		continue
 	// 	}
-	//
-	// 	log.Info(devProps.Address)
-	// 	if devProps.Address != hwaddr {
+
+	// 	log.Debugf("device %v services resolved? %v %v", p.Address, p.ServicesResolved, p.UUIDs)
+	// 	if !hasUUID(p.UUIDs, snapdOnboardingService) {
 	// 		continue
 	// 	}
-	//
-	// 	log.Infof("Found cached device Connected=%t Trusted=%t Paired=%t", devProps.Connected, devProps.Trusted, devProps.Paired)
+	// 	log.Infof("Found cached device Connected=%t Trusted=%t Paired=%t", p.Connected, p.Trusted, p.Paired)
 	// 	return dev, nil
 	// }
 
@@ -150,7 +158,7 @@ func discover(a *adapter.Adapter1, hwaddr string) (*device.Device1, error) {
 	}
 
 	discovery, cancel, err := api.Discover(a, &adapter.DiscoveryFilter{
-		UUIDs:     []string{snapdOnboardingService},
+		// UUIDs:     []string{snapdOnboardingService},
 		Transport: adapter.DiscoveryFilterTransportLE,
 	})
 	if err != nil {
@@ -160,7 +168,7 @@ func discover(a *adapter.Adapter1, hwaddr string) (*device.Device1, error) {
 	defer cancel()
 
 	for ev := range discovery {
-
+		log.Infof("new device at %v", ev.Path)
 		dev, err := device.NewDevice1(ev.Path)
 		if err != nil {
 			return nil, err
@@ -175,6 +183,28 @@ func discover(a *adapter.Adapter1, hwaddr string) (*device.Device1, error) {
 		n := p.Alias
 		if p.Name != "" {
 			n = p.Name
+		}
+		log.Debugf("device %v services resolved? %v %v", p.Address, p.ServicesResolved, p.UUIDs)
+
+		if p.Address == hwaddr {
+			return dev, nil
+		} else {
+			continue
+		}
+		for i := 0; i < 10; i++ {
+			resolved, err := dev.GetServicesResolved()
+			if err != nil {
+				return nil, fmt.Errorf("cannot resolve services: %v", err)
+			}
+			if resolved {
+				log.Debugf("services resolved")
+				break
+			}
+			log.Tracef("waiting to resolve services of %v", p.Address)
+			time.Sleep(1 * time.Second)
+		}
+		if !hasUUID(p.UUIDs, OnboardingServiceUUID) {
+			continue
 		}
 		log.Debugf("Discovered (%s) %s", n, p.Address)
 		return dev, nil

@@ -7,21 +7,19 @@ import (
 	"github.com/muka/go-bluetooth/api/service"
 	"github.com/muka/go-bluetooth/bluez/profile/agent"
 	"github.com/muka/go-bluetooth/bluez/profile/gatt"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
 	appName = "snapd onboarding"
 
-	//                               -0000-1000-8000-00805F9B34FB
-	//                        12634d89-d598-4874-8e86-7d042ee07ba
-	OnboardingServiceUUID = "1234-0000-1000-8000-00805F9B34FB"
-
-	// XXX: are there better ones?
-	serviceHandle  = "1000"
-	commCharHandle = "2000"
-
-	descrString = "Communication for snapd onboarding"
-	descrHandle = "3000"
+	OnboardingServiceUUID = "12341000-d598-4874-8e86-7d042ee07ba"
+	UUIDBase              = "1234"
+	UUIDSuffix            = "-d598-4874-8e86-7d042ee07ba"
+	serviceHandle         = "1000"
+	commCharHandle        = "2000"
+	descrHandle           = "3000"
+	descrString           = "Communication for snapd onboarding"
 )
 
 func runServer(devName string) error {
@@ -46,10 +44,6 @@ type Server struct {
 // managed objects under org.bluez and finding the ones that implement
 // org.bluez.GattManager1.
 func NewServer(devName string) (*Server, error) {
-	uuidPrefix := "1234"
-	uuidSuffix := "-0000-1000-8000-00805F9B34FB"
-	fmt.Println(uuidPrefix)
-	fmt.Println(uuidSuffix)
 
 	// create bluetooth "app" that advertises itself
 	options := service.AppOptions{
@@ -57,8 +51,8 @@ func NewServer(devName string) (*Server, error) {
 		AgentCaps: agent.CapNoInputNoOutput,
 		// XXX: could we simply pass the fully uuid here instead of
 		// this strange dance?
-		UUIDSuffix: uuidSuffix,
-		UUID:       "1234",
+		UUIDSuffix: UUIDSuffix,
+		UUID:       UUIDBase,
 	}
 	app, err := service.NewApp(options)
 	if err != nil {
@@ -84,6 +78,7 @@ func NewServer(devName string) (*Server, error) {
 	if err := app.AddService(service1); err != nil {
 		return nil, err
 	}
+	log.Infof("service UUID: %v", service1.UUID)
 	commChar, err := service1.NewChar(commCharHandle)
 	if err != nil {
 		return nil, err
@@ -97,6 +92,7 @@ func NewServer(devName string) (*Server, error) {
 	if err = service1.AddChar(commChar); err != nil {
 		return nil, err
 	}
+	log.Infof("characteristic UUID: %v", commChar.UUID)
 
 	// now add description
 	descr, err := commChar.NewDescr(descrHandle)
@@ -113,6 +109,7 @@ func NewServer(devName string) (*Server, error) {
 	if err = commChar.AddDescr(descr); err != nil {
 		return nil, err
 	}
+	log.Infof("descriptor UUID: %v", descr.UUID)
 	return server, nil
 }
 
@@ -121,6 +118,7 @@ func (s *Server) Run() error {
 		return err
 	}
 
+	log.Infof("advertise")
 	// 0 means no timeout
 	cancel, err := s.app.Advertise(0)
 	if err != nil {
@@ -128,6 +126,7 @@ func (s *Server) Run() error {
 	}
 	defer cancel()
 
+	log.Infof("waiting...")
 	select {}
 
 	return nil
