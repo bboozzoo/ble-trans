@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/go-ble/ble"
-	ble_linux "github.com/go-ble/ble/linux"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -28,12 +27,6 @@ func hasUUID(uuids []string, uuid string) bool {
 }
 
 func client(hwaddr string) (err error) {
-	dev, err := ble_linux.NewDevice()
-	if err != nil {
-		return fmt.Errorf("cannot obtain device: %v", err)
-	}
-	ble.SetDefaultDevice(dev)
-
 	hwaddr = strings.ToLower(hwaddr)
 
 	log.SetLevel(log.TraceLevel)

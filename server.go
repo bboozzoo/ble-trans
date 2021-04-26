@@ -1,12 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"runtime"
+	"time"
 
-	"github.com/muka/go-bluetooth/api/service"
-	"github.com/muka/go-bluetooth/bluez/profile/agent"
-	"github.com/muka/go-bluetooth/bluez/profile/gatt"
+	"github.com/go-ble/ble"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -27,129 +27,93 @@ const (
 	descrString           = "Communication for snapd onboarding"
 )
 
-func runServer(devName string) error {
-	app, err := NewServer(devName)
-	if err != nil {
-		return err
-	}
-	// XXX: detect ctrl-c and app.Close() ?
-	return app.Run()
-}
-
 type Server struct {
-	app     *service.App
-	readCnt int
+	UUID string
 }
 
-// NewServer creates a new ble server that advertises itself.
-//
-// The devName is the device name of the hci device, usually "hci0"
-//
-// The name can be obtained via "hcitool dev" or by inspecting the
-// managed objects under org.bluez and finding the ones that implement
-// org.bluez.GattManager1.
-func NewServer(devName string) (*Server, error) {
-
-	// create bluetooth "app" that advertises itself
-	options := service.AppOptions{
-		AdapterID: devName,
-		AgentCaps: agent.CapNoInputNoOutput,
-		// XXX: could we simply pass the fully uuid here instead of
-		// this strange dance?
-		UUIDSuffix: UUIDSuffix,
-		UUID:       UUIDBase,
-	}
-	app, err := service.NewApp(options)
-	if err != nil {
-		return nil, err
-	}
-	runtime.SetFinalizer(app, func(x *service.App) { x.Close() })
-	app.SetName(appName)
-
-	if !app.Adapter().Properties.Powered {
-		if err := app.Adapter().SetPowered(true); err != nil {
-			return nil, err
-		}
-	}
-	server := &Server{
-		app: app,
+func runServer(devName string) error {
+	app := NewServer()
+	// XXX: detect ctrl-c and app.Close() ?
+	uuid := ble.MustParse(app.UUID)
+	testSvc := ble.NewService(uuid)
+	testSvc.AddCharacteristic(NewSnapdChar())
+	if err := ble.AddService(testSvc); err != nil {
+		log.Fatalf("can't add service: %s", err)
 	}
 
-	// add communication characteristic
-	service1, err := app.NewService(serviceHandle)
-	if err != nil {
-		return nil, err
-	}
-	if err := app.AddService(service1); err != nil {
-		return nil, err
-	}
-	log.Infof("service UUID: %v", service1.UUID)
-	commChar, err := service1.NewChar(commCharHandle)
-	if err != nil {
-		return nil, err
-	}
-	commChar.Properties.Flags = []string{
-		gatt.FlagCharacteristicRead,
-		gatt.FlagCharacteristicWrite,
-	}
-	commChar.OnRead(server.onRead)
-	commChar.OnWrite(server.onWrite)
-	if err = service1.AddChar(commChar); err != nil {
-		return nil, err
-	}
-	log.Infof("characteristic UUID: %v", commChar.UUID)
-
-	// now add description
-	descr, err := commChar.NewDescr(descrHandle)
-	if err != nil {
-		return nil, err
-	}
-	descr.Properties.Flags = []string{
-		gatt.FlagDescriptorRead,
-	}
-	descr.OnRead(service.DescrReadCallback(func(c *service.Descr, options map[string]interface{}) ([]byte, error) {
-		server.readCnt++
-		content := fmt.Sprintf("%s read: %v", descrString, server.readCnt)
-		log.Tracef("content: %q (len: %v)", content, len(content))
-		return []byte(content), nil
-	}))
-	if err = commChar.AddDescr(descr); err != nil {
-		return nil, err
-	}
-	log.Infof("descriptor UUID: %v", descr.UUID)
-	return server, nil
-}
-
-func (s *Server) Run() error {
-	if err := s.app.Run(); err != nil {
-		return err
+	// Advertise for specified durantion, or until interrupted by user.
+	log.Info("Advertising...")
+	ctx := ble.WithSigHandler(context.WithTimeout(context.Background(), 10*60*time.Second))
+	err := ble.AdvertiseNameAndServices(ctx, "Ubuntu Core", uuid)
+	switch {
+	case err == nil:
+	case errors.Is(err, context.DeadlineExceeded):
+		log.Infof("advertising finished")
+	case errors.Is(err, context.Canceled):
+		log.Infof("canceled")
+		return fmt.Errorf("interrupted")
+	default:
+		log.Errorf("failed: %v", err)
+		return fmt.Errorf("cannot advertise: %v", err)
 	}
 
-	log.Infof("advertise")
-	// 0 means no timeout
-	cancel, err := s.app.Advertise(0)
-	if err != nil {
-		return err
-	}
-	defer cancel()
-
-	log.Infof("waiting...")
 	select {}
-
-	return nil
 }
 
-func (s *Server) Close() error {
-	if s.app != nil {
-		s.app.Close()
+func NewServer() *Server {
+	return &Server{
+		UUID: OnboardingServiceUUID,
 	}
-	return nil
 }
 
-func (s *Server) onRead(c *service.Char, options map[string]interface{}) ([]byte, error) {
-	return nil, nil
+func NewSnapdChar() *ble.Characteristic {
+	s := snapdChar{}
+	c := &ble.Characteristic{
+		UUID: ble.MustParse(UUIDBase + commCharHandle + UUIDSuffix),
+	}
+	d := &ble.Descriptor{
+		UUID: ble.MustParse(UUIDBase + descrHandle + UUIDSuffix),
+	}
+	d.HandleRead(ble.ReadHandlerFunc(s.read))
+	d.HandleWrite(ble.WriteHandlerFunc(s.written))
+	c.AddDescriptor(d)
+	// c.HandleNotify(ble.NotifyHandlerFunc(s.echo))
+	// c.HandleIndicate(ble.NotifyHandlerFunc(s.echo))
+	return c
 }
 
-func (s *Server) onWrite(c *service.Char, value []byte) ([]byte, error) {
-	return nil, nil
+type snapdChar struct {
+	cnt int
 }
+
+func (s *snapdChar) read(req ble.Request, rsp ble.ResponseWriter) {
+	if req.Offset() == 0 {
+		s.cnt++
+	}
+	content := fmt.Sprintf("Communication for snapd onboarding read: %v", s.cnt)
+	if req.Offset() == 0 {
+		log.Tracef("starting sending of %q len(%v)", content, len(content))
+	}
+	log.Tracef("    offset %v cap %v", req.Offset(), rsp.Cap())
+
+	start := req.Offset()
+	toSend := len(content[start:])
+	if toSend > rsp.Cap() {
+		toSend = rsp.Cap()
+	}
+	n, err := rsp.Write([]byte(content[start : start+toSend]))
+	log.Tracef("sent, %v bytes, err: %v", n, err)
+	if err != nil {
+		return
+	}
+}
+
+func (s *snapdChar) written(req ble.Request, rsp ble.ResponseWriter) {
+	data := req.Data()
+	log.Tracef("got data: %x", data)
+	log.Tracef("          %q", string(data))
+}
+
+// func (s *snapdChar) echo(req ble.Request, n ble.Notifier) {
+// notify
+// }

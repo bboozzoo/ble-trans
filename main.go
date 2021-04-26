@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/go-ble/ble"
+	ble_linux "github.com/go-ble/ble/linux"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -13,6 +15,13 @@ func main() {
 		FullTimestamp: true,
 	})
 
+	dev, err := ble_linux.NewDeviceWithName("snapd")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cannot obtain device: %v", err)
+		os.Exit(1)
+	}
+	ble.SetDefaultDevice(dev)
+
 	// XXX: use proper cmdline parser
 	what := "server"
 	iface := "hci0"
@@ -21,7 +30,6 @@ func main() {
 		what = os.Args[1]
 	}
 
-	var err error
 	switch what {
 	case "server":
 		err = runServer(iface)
