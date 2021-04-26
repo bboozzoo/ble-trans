@@ -13,12 +13,16 @@ import (
 const (
 	appName = "snapd onboarding"
 
-	UUIDBase   = "1234"
+	// 99df99df-0000-1000-8000-00805f9b34fb
+	// 99df99e0-0000-1000-8000-00805f9b34fb
+	// 99df99e1-0000-1000-8000-00805f9b34fb
+
+	UUIDBase   = "99df"
 	UUIDSuffix = "-0000-1000-8000-00805f9b34fb"
 	//UUIDSuffix            = "-d598-4874-8e86-7d042ee07ba"
-	serviceHandle         = "1000"
-	commCharHandle        = "2000"
-	descrHandle           = "3000"
+	serviceHandle         = "99df"
+	commCharHandle        = "99e0"
+	descrHandle           = "99e1"
 	OnboardingServiceUUID = UUIDBase + serviceHandle + UUIDSuffix
 	descrString           = "Communication for snapd onboarding"
 )
@@ -105,7 +109,9 @@ func NewServer(devName string) (*Server, error) {
 	}
 	descr.OnRead(service.DescrReadCallback(func(c *service.Descr, options map[string]interface{}) ([]byte, error) {
 		server.readCnt++
-		return []byte(fmt.Sprintf("%s read: %v", descrString, server.readCnt)), nil
+		content := fmt.Sprintf("%s read: %v", descrString, server.readCnt)
+		log.Tracef("content: %q (len: %v)", content, len(content))
+		return []byte(content), nil
 	}))
 	if err = commChar.AddDescr(descr); err != nil {
 		return nil, err
