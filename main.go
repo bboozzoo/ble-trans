@@ -26,7 +26,11 @@ func main() {
 	case "server":
 		err = runServer(iface)
 	case "client":
-		err = client(iface, "B8:27:EB:6F:C1:30")
+		if len(os.Args) < 3 {
+			fmt.Fprintf(os.Stderr, "missing client address\n")
+			os.Exit(1)
+		}
+		err = client(os.Args[2])
 	default:
 		err = fmt.Errorf("unknown action %q: try client/server", what)
 	}
