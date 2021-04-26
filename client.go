@@ -74,9 +74,9 @@ func client(hwaddr string) (err error) {
 		return nil
 	}
 
-	desc := p.FindDescriptor(ble.NewDescriptor(ble.MustParse(UUIDBase + descrHandle + UUIDSuffix)))
-	if desc == nil {
-		return fmt.Errorf("descriptor not found")
+	snapdChar := p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(UUIDBase + commCharHandle + UUIDSuffix)))
+	if snapdChar == nil {
+		return fmt.Errorf("characteristic not found")
 	}
 
 	tick := time.NewTicker(time.Second)
@@ -84,9 +84,9 @@ func client(hwaddr string) (err error) {
 	for {
 		select {
 		case <-tick.C:
-			data, err := cln.ReadDescriptor(desc)
+			data, err := cln.ReadCharacteristic(snapdChar)
 			if err != nil {
-				return fmt.Errorf("cannot read descriptor %v: %v", desc.UUID.String(), err)
+				return fmt.Errorf("cannot read characteristic %v: %v", snapdChar.UUID.String(), err)
 			}
 			log.Infof("value: %q", string(data))
 		}

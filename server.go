@@ -71,11 +71,11 @@ func NewSnapdChar() *ble.Characteristic {
 	c := &ble.Characteristic{
 		UUID: ble.MustParse(UUIDBase + commCharHandle + UUIDSuffix),
 	}
+	c.HandleRead(ble.ReadHandlerFunc(s.read))
+	c.HandleWrite(ble.WriteHandlerFunc(s.written))
 	d := &ble.Descriptor{
 		UUID: ble.MustParse(UUIDBase + descrHandle + UUIDSuffix),
 	}
-	d.HandleRead(ble.ReadHandlerFunc(s.read))
-	d.HandleWrite(ble.WriteHandlerFunc(s.written))
 	c.AddDescriptor(d)
 	// c.HandleNotify(ble.NotifyHandlerFunc(s.echo))
 	// c.HandleIndicate(ble.NotifyHandlerFunc(s.echo))
@@ -109,6 +109,7 @@ func (s *snapdChar) read(req ble.Request, rsp ble.ResponseWriter) {
 }
 
 func (s *snapdChar) written(req ble.Request, rsp ble.ResponseWriter) {
+
 	data := req.Data()
 	log.Tracef("got data: %x", data)
 	log.Tracef("          %q", string(data))
