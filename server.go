@@ -320,3 +320,52 @@ func (s *snapdRequestTransmit) readCurrentSizeDescr(req ble.Request, rsp ble.Res
 		log.Errorf("req: cannot write current chunk size: %v", err)
 	}
 }
+
+type bleDeviceTransport struct {
+	rsp *snapdResponseTransmit // dev -> configurator
+	req *snapdRequestTransmit  // configurator -> dev
+
+	advertiseCancel context.CancelFunc
+}
+
+func newInitializedDeviceTransport() deviceTransport {
+	onboardingSvc := ble.NewService(ble.MustParse(OnboardingServiceUUID))
+	responseChar, response := NewSnapdResponseTransmit()
+	onboardingSvc.AddCharacteristic(responseChar)
+	onboardingSvc.AddCharacteristic(NewSnapdDeviceChar())
+	requestChar, request := NewSnapdRequestTransmit()
+	onboardingSvc.AddCharacteristic(requestChar)
+
+	if err := ble.AddService(onboardingSvc); err != nil {
+		log.Fatalf("can't add service: %s", err)
+	}
+	return &bleDeviceTransport{
+		rsp: response,
+		req: request,
+	}
+}
+
+func (b *bleDeviceTransport) Advertise() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	err := ble.AdvertiseNameAndServices(ctx, "Ubuntu Core", ble.MustParse(OnboardingServiceUUID))
+	if err != nil {
+		cancel()
+		return err
+	}
+	b.advertiseCancel = cancel
+	return nil
+}
+func (b *bleDeviceTransport) Hide() {
+	if b.advertiseCancel != nil {
+		b.advertiseCancel()
+	}
+}
+
+func (b *bleDeviceTransport) WaitConnected() ([]byte, error) { return nil, nil }
+
+func (b *bleDeviceTransport) Disconnect(peer []byte)        {}
+func (b *bleDeviceTransport) NotifyState(state State) error { return nil }
+
+func (b *bleDeviceTransport) Send([]byte) error { return nil }
+
+func (b *bleDeviceTransport) Receive(ctx context.Context) ([]byte, error) { return nil, nil }

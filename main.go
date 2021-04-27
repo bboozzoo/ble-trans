@@ -47,6 +47,10 @@ func main() {
 			os.Exit(1)
 		}
 		err = client(os.Args[2])
+	case "device":
+		fallthrough
+	case "configurator":
+		fallthrough
 	default:
 		err = fmt.Errorf("unknown action %q: try client/server", what)
 	}
