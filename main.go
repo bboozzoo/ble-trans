@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-ble/ble"
 	ble_linux "github.com/go-ble/ble/linux"
+	"github.com/go-ble/ble/linux/hci/evt"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -15,7 +16,14 @@ func main() {
 		FullTimestamp: true,
 	})
 
-	dev, err := ble_linux.NewDeviceWithName("snapd")
+	dev, err := ble_linux.NewDeviceWithName("snapd",
+		ble.OptConnectHandler(func(e evt.LEConnectionComplete) {
+			log.Infof("connect handler, peer: %x handle: %v", e.PeerAddress(), e.ConnectionHandle())
+		}),
+		ble.OptDisconnectHandler(func(e evt.DisconnectionComplete) {
+			log.Infof("disconnected, handle: %v", e.ConnectionHandle())
+		}),
+	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cannot obtain device: %v", err)
 		os.Exit(1)
