@@ -17,26 +17,7 @@ import (
 const (
 	appName = "snapd onboarding"
 
-	// 99df99df-0000-1000-8000-00805f9b34fb
-	// 99df99e0-0000-1000-8000-00805f9b34fb
-	// 99df99e1-0000-1000-8000-00805f9b34fb
-
-	UUIDBase   = "99df"
-	UUIDSuffix = "-0000-1000-8000-00805f9b34fb"
-	//UUIDSuffix            = "-d598-4874-8e86-7d042ee07ba"
-	serviceHandle        = "99df"
-	onboardingCharHandle = "99e0"
-	stateDescrHandle     = "99e1"
-
-	transmitCharHandle       = "99d0"
-	transmitChunkDescrHandle = "99d1"
-	transmitSizeDescrHandle  = "99d2"
-
-	transmitRequestCharHandle      = "99c0"
-	transmitRequestSizeDescrHandle = "99c1"
-
-	OnboardingServiceUUID = UUIDBase + serviceHandle + UUIDSuffix
-	descrString           = "Onboarding protocol sate"
+	descrString = "Onboarding protocol sate"
 )
 
 type Server struct {
@@ -91,12 +72,12 @@ func NewServer() *Server {
 func NewSnapdDeviceChar() *ble.Characteristic {
 	s := snapdDeviceChar{}
 	c := &ble.Characteristic{
-		UUID: ble.MustParse(UUIDBase + onboardingCharHandle + UUIDSuffix),
+		UUID: ble.MustParse(OnboardingCharUUID),
 	}
 	c.HandleRead(ble.ReadHandlerFunc(s.read))
 	c.HandleWrite(ble.WriteHandlerFunc(s.written))
 	d := &ble.Descriptor{
-		UUID: ble.MustParse(UUIDBase + stateDescrHandle + UUIDSuffix),
+		UUID: ble.MustParse(OnboardingStatePropUUID),
 	}
 	c.AddDescriptor(d)
 	d.HandleRead(ble.ReadHandlerFunc(s.readProtocolState))
@@ -169,18 +150,18 @@ func NewSnapdResponseTransmit() (*ble.Characteristic, *snapdResponseTransmit) {
 		chunkStartChange: make(chan uint32, 1),
 	}
 	c := &ble.Characteristic{
-		UUID: ble.MustParse(UUIDBase + transmitCharHandle + UUIDSuffix),
+		UUID: ble.MustParse(ResponseCharUUID),
 	}
 	c.HandleRead(ble.ReadHandlerFunc(s.readNextChunk))
 	c.HandleWrite(ble.WriteHandlerFunc(s.handleRewindTo))
 	c.HandleNotify(ble.NotifyHandlerFunc(s.notifyNewOffset))
 	dSize := &ble.Descriptor{
-		UUID: ble.MustParse(UUIDBase + transmitSizeDescrHandle + UUIDSuffix),
+		UUID: ble.MustParse(ResponsePropSizeUUID),
 	}
 	dSize.HandleRead(ble.ReadHandlerFunc(s.readCurrentSizeDescr))
 	c.AddDescriptor(dSize)
 	dChunk := &ble.Descriptor{
-		UUID: ble.MustParse(UUIDBase + transmitChunkDescrHandle + UUIDSuffix),
+		UUID: ble.MustParse(ResponsePropChunkStartUUID),
 	}
 	dChunk.HandleRead(ble.ReadHandlerFunc(s.readCurrentChunkDescr))
 	c.AddDescriptor(dChunk)
@@ -303,12 +284,12 @@ func NewSnapdRequestTransmit() (*ble.Characteristic, *snapdRequestTransmit) {
 		currentSizeChange: make(chan uint32, 1),
 	}
 	c := &ble.Characteristic{
-		UUID: ble.MustParse(UUIDBase + transmitRequestCharHandle + UUIDSuffix),
+		UUID: ble.MustParse(RequestCharUUID),
 	}
 	c.HandleWrite(ble.WriteHandlerFunc(s.handleDataWrite))
 	c.HandleNotify(ble.NotifyHandlerFunc(s.notifySize))
 	dSize := &ble.Descriptor{
-		UUID: ble.MustParse(UUIDBase + transmitRequestSizeDescrHandle + UUIDSuffix),
+		UUID: ble.MustParse(RequestSizePropUUID),
 	}
 	dSize.HandleRead(ble.ReadHandlerFunc(s.readCurrentSizeDescr))
 	c.AddDescriptor(dSize)
