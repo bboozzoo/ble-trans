@@ -101,6 +101,12 @@ func client(hwaddr string) (err error) {
 
 	cln.Subscribe(transmitChar, false, ble.NotificationHandler(func(req []byte) {
 		log.Tracef("got req: %x", req)
+		offset, err := readUint32Size(req)
+		if err != nil {
+			log.Errorf("cannot unpack new offset: %v", err)
+			return
+		}
+		log.Tracef("new offset: %v", offset)
 	}))
 
 	data := make([]byte, 0, size)
@@ -110,17 +116,20 @@ func client(hwaddr string) (err error) {
 		return fmt.Errorf("cannot rewind: %v", err)
 	}
 	for {
+		// XXX: use ReadLongCharacteristic once server supports ReadBlob?
 		currentData, err := cln.ReadCharacteristic(transmitChar)
 		if err != nil {
 			return fmt.Errorf("cannot read characteristic: %v", err)
 		}
 		data = append(data, currentData...)
+		log.Tracef("got %v bytes", len(currentData))
 		chunkOffset, err := readUint32SizeFromDescriptor(cln, transmitChunk)
 		if err != nil {
 			return fmt.Errorf("cannot read chunk: %v", err)
 		}
 		log.Tracef("chunk offset: %v", chunkOffset)
 		got += uint32(len(currentData))
+		log.Tracef("got: %v", got)
 		if got == size {
 			log.Infof("got everything")
 			log.Tracef("data:\n%s", string(data))
@@ -133,7 +142,7 @@ func client(hwaddr string) (err error) {
 	for {
 		select {
 		case <-tick.C:
-			data, err := cln.ReadCharacteristic(snapdChar)
+			data, err := cln.ReadLongCharacteristic(snapdChar)
 			if err != nil {
 				return fmt.Errorf("cannot read characteristic %v: %v", snapdChar.UUID.String(), err)
 			}

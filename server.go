@@ -56,7 +56,7 @@ func runServer(devName string) error {
 		log.Fatalf("can't add service: %s", err)
 	}
 
-	// Advertise for specified durantion, or until interrupted by user.
+	// Advertise for specified duration, or until interrupted by user.
 	log.Info("Advertising...")
 	ctx := ble.WithSigHandler(context.WithTimeout(context.Background(), 10*60*time.Second))
 	err = ble.AdvertiseNameAndServices(ctx, "Ubuntu Core", uuid)
@@ -159,7 +159,6 @@ type snapdTransmit struct {
 
 func NewSnapdTransmit() (*ble.Characteristic, *snapdTransmit) {
 	s := snapdTransmit{
-		chunkSize:        256,
 		chunkStartChange: make(chan uint32, 1),
 	}
 	c := &ble.Characteristic{
@@ -187,21 +186,21 @@ func (s *snapdTransmit) transmitData(data []byte) {
 	s.currentChunkStart = 0
 }
 
-func (s *snapdTransmit) chunk() ([]byte, uint32) {
+func (s *snapdTransmit) chunk(size uint32) ([]byte, uint32) {
 	thisChunkSize := s.currentSize - s.currentChunkStart
-	if thisChunkSize > s.chunkSize {
-		thisChunkSize = s.chunkSize
+	if thisChunkSize > size {
+		thisChunkSize = size
 	}
 	log.Tracef("this chunk start %v/%v size: %v", s.currentChunkStart, s.currentSize, thisChunkSize)
 	return s.data[s.currentChunkStart : s.currentChunkStart+thisChunkSize], s.currentChunkStart + thisChunkSize
 }
 
-func (s *snapdTransmit) advanceChunk() (start uint32, complete bool) {
-	if s.currentChunkStart+s.chunkSize > s.currentSize {
+func (s *snapdTransmit) advanceChunk(size uint32) (start uint32, complete bool) {
+	if s.currentChunkStart+size > s.currentSize {
 		s.currentChunkStart = s.currentSize
 		return s.currentChunkStart, true
 	}
-	s.currentChunkStart += s.chunkSize
+	s.currentChunkStart += size
 	s.chunkStartChange <- s.currentChunkStart
 	return s.currentChunkStart, false
 }
@@ -220,9 +219,11 @@ func (s *snapdTransmit) readNextChunk(req ble.Request, rsp ble.ResponseWriter) {
 	if req.Offset() == 0 {
 		log.Tracef("start reading chunk")
 	}
+	// XXX: support ReadBlob requests
+
 	log.Tracef("    offset %v cap %v", req.Offset(), rsp.Cap())
 
-	chunk, nextChunkStart := s.chunk()
+	chunk, nextChunkStart := s.chunk(uint32(rsp.Cap()))
 	log.Tracef("    chunk size: %v next offset: %v", len(chunk), nextChunkStart)
 
 	start := req.Offset()
@@ -238,7 +239,7 @@ func (s *snapdTransmit) readNextChunk(req ble.Request, rsp ble.ResponseWriter) {
 	}
 	if req.Offset()+n == len(chunk) {
 		// whole chunk was read, advance
-		next, done := s.advanceChunk()
+		next, done := s.advanceChunk(uint32(len(chunk)))
 		if !done {
 			log.Tracef("chunk was read, advance to %v/%v", next, s.currentSize)
 		} else {
