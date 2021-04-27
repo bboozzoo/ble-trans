@@ -121,10 +121,11 @@ func (c *configurator) Configure() error {
 type deviceTransport interface {
 	Advertise() error
 	Hide()
-	WaitConnected() ([]byte, error)
+	WaitConnected() (peer string, err error)
 	Disconnect(peer []byte)
 	NotifyState(state State) error
 	Send([]byte) error
+	PrepareReceive() error
 	Receive(ctx context.Context) ([]byte, error)
 }
 
@@ -148,7 +149,7 @@ func (d *device) WaitForConfiguration() error {
 	if err != nil {
 		return fmt.Errorf("cannot wait for connection: %v", err)
 	}
-	fmt.Printf("connection from peer: %x\n", peer)
+	fmt.Printf("connection from peer: %s\n", peer)
 
 	// stop announcing
 	d.t.Hide()

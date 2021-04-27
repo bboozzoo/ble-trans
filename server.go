@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
+	"sync"
 	"time"
 
 	"github.com/go-ble/ble"
@@ -36,7 +37,8 @@ func runServer(devName string) error {
 	responseChar, response := NewSnapdResponseTransmit()
 	onboardingSvc.AddCharacteristic(responseChar)
 	response.transmitData(data)
-	onboardingSvc.AddCharacteristic(NewSnapdDeviceChar())
+	devChar, _ := NewSnapdDeviceChar()
+	onboardingSvc.AddCharacteristic(devChar)
 	requestChar, _ := NewSnapdRequestTransmit()
 	onboardingSvc.AddCharacteristic(requestChar)
 
@@ -69,8 +71,10 @@ func NewServer() *Server {
 	}
 }
 
-func NewSnapdDeviceChar() *ble.Characteristic {
-	s := snapdDeviceChar{}
+func NewSnapdDeviceChar() (*ble.Characteristic, *snapdDeviceChar) {
+	s := snapdDeviceChar{
+		stateChange: make(chan uint32, 1),
+	}
 	c := &ble.Characteristic{
 		UUID: ble.MustParse(OnboardingCharUUID),
 	}
@@ -81,13 +85,19 @@ func NewSnapdDeviceChar() *ble.Characteristic {
 	}
 	c.AddDescriptor(d)
 	d.HandleRead(ble.ReadHandlerFunc(s.readProtocolState))
-	// c.HandleNotify(ble.NotifyHandlerFunc(s.echo))
-	// c.HandleIndicate(ble.NotifyHandlerFunc(s.echo))
-	return c
+	c.HandleNotify(ble.NotifyHandlerFunc(s.notifyProtocolState))
+	return c, &s
 }
 
 type snapdDeviceChar struct {
-	cnt int
+	cnt         int
+	stateChange chan uint32
+	state       uint32
+}
+
+func (s *snapdDeviceChar) setState(state State) {
+	s.state = uint32(state)
+	s.stateChange <- uint32(state)
 }
 
 func (s *snapdDeviceChar) read(req ble.Request, rsp ble.ResponseWriter) {
@@ -113,6 +123,7 @@ func (s *snapdDeviceChar) read(req ble.Request, rsp ble.ResponseWriter) {
 }
 
 func (s *snapdDeviceChar) written(req ble.Request, rsp ble.ResponseWriter) {
+	// support resetting to given state?
 
 	data := req.Data()
 	log.Tracef("got data: %x", data)
@@ -120,12 +131,21 @@ func (s *snapdDeviceChar) written(req ble.Request, rsp ble.ResponseWriter) {
 	log.Tracef("          offset: %v", req.Offset())
 }
 
-// func (s *snapdChar) echo(req ble.Request, n ble.Notifier) {
-// notify
-// }
+func (s *snapdDeviceChar) notifyProtocolState(req ble.Request, n ble.Notifier) {
+	for {
+		select {
+		case state := <-s.stateChange:
+			if err := binary.Write(n, binary.LittleEndian, state); err != nil {
+				log.Errorf("req: cannot write current chunk size: %v", err)
+			}
+		}
+	}
+}
 
 func (s *snapdDeviceChar) readProtocolState(req ble.Request, rsp ble.ResponseWriter) {
-
+	if err := binary.Write(rsp, binary.LittleEndian, s.state); err != nil {
+		log.Errorf("req: cannot write current chunk size: %v", err)
+	}
 }
 
 type snapdResponseTransmit struct {
@@ -135,6 +155,8 @@ type snapdResponseTransmit struct {
 	currentChunkStart uint32
 	currentSize       uint32
 	chunkStartChange  chan uint32
+
+	lock sync.Mutex
 }
 
 func NewSnapdResponseTransmit() (*ble.Characteristic, *snapdResponseTransmit) {
@@ -161,6 +183,8 @@ func NewSnapdResponseTransmit() (*ble.Characteristic, *snapdResponseTransmit) {
 }
 
 func (s *snapdResponseTransmit) transmitData(data []byte) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	s.data = data
 	s.currentSize = uint32(len(data))
 	s.currentChunkStart = 0
@@ -193,11 +217,18 @@ func (s *snapdResponseTransmit) rewindTo(start uint32) {
 }
 
 func (s *snapdResponseTransmit) readNextChunk(req ble.Request, rsp ble.ResponseWriter) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	if len(s.data) == 0 {
 		return
 	}
 	if req.Offset() == 0 {
 		log.Tracef("rsp: start reading chunk")
+	} else {
+		// handle this properly?
+		rsp.SetStatus(ble.ErrAttrNotLong)
+		return
 	}
 	// XXX: support ReadBlob requests
 
@@ -230,18 +261,25 @@ func (s *snapdResponseTransmit) readNextChunk(req ble.Request, rsp ble.ResponseW
 }
 
 func (s *snapdResponseTransmit) readCurrentChunkDescr(req ble.Request, rsp ble.ResponseWriter) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	if err := binary.Write(rsp, binary.LittleEndian, s.currentChunkStart); err != nil {
 		log.Errorf("rsp: cannot write current chunk offset: %v", err)
 	}
 }
 
 func (s *snapdResponseTransmit) readCurrentSizeDescr(req ble.Request, rsp ble.ResponseWriter) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	if err := binary.Write(rsp, binary.LittleEndian, s.currentSize); err != nil {
 		log.Errorf("rsp: cannot write current chunk size: %v", err)
 	}
 }
 
 func (s *snapdResponseTransmit) handleRewindTo(req ble.Request, rsp ble.ResponseWriter) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	var offset uint32
 	if err := binary.Read(bytes.NewBuffer(req.Data()), binary.LittleEndian, &offset); err != nil {
 		log.Errorf("rsp: cannot read rewind-to offset: %v", err)
@@ -265,10 +303,15 @@ func (s *snapdResponseTransmit) notifyNewOffset(req ble.Request, n ble.Notifier)
 }
 
 type snapdRequestTransmit struct {
-	data []byte
+	data      []byte
+	dataReady bool
 
 	currentSize       uint32
 	currentSizeChange chan uint32
+
+	lock sync.Mutex
+
+	readyFunc func([]byte)
 }
 
 func NewSnapdRequestTransmit() (*ble.Characteristic, *snapdRequestTransmit) {
@@ -289,10 +332,15 @@ func NewSnapdRequestTransmit() (*ble.Characteristic, *snapdRequestTransmit) {
 }
 
 func (s *snapdRequestTransmit) handleDataWrite(req ble.Request, rsp ble.ResponseWriter) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	data := req.Data()
 	if len(data) == 0 {
 		// done?
+		s.dataReady = true
 		log.Tracef("req: done?\n%s", string(s.data))
+		s.notifyReadCompleteLocked()
 		return
 	}
 	log.Tracef("req: got %v bytes", len(data))
@@ -316,56 +364,141 @@ func (s *snapdRequestTransmit) notifySize(req ble.Request, n ble.Notifier) {
 }
 
 func (s *snapdRequestTransmit) readCurrentSizeDescr(req ble.Request, rsp ble.ResponseWriter) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	if err := binary.Write(rsp, binary.LittleEndian, s.currentSize); err != nil {
 		log.Errorf("req: cannot write current chunk size: %v", err)
 	}
 }
 
+func (s *snapdRequestTransmit) reset() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.data = nil
+	s.dataReady = false
+	s.currentSize = 0
+}
+
+func (s *snapdRequestTransmit) notifyReadCompleteLocked() {
+	if s.readyFunc != nil {
+		s.readyFunc(s.data)
+	}
+}
+
+func (s *snapdRequestTransmit) waitForReady(f func([]byte)) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	s.readyFunc = f
+
+	if s.dataReady {
+		s.notifyReadCompleteLocked()
+		return
+	}
+}
+
+func runDevice(connectChan <-chan string) error {
+	dt := newInitializedDeviceTransport(connectChan)
+	dev := NewDevice(dt)
+	return dev.WaitForConfiguration()
+}
+
 type bleDeviceTransport struct {
 	rsp *snapdResponseTransmit // dev -> configurator
 	req *snapdRequestTransmit  // configurator -> dev
+	dev *snapdDeviceChar
+
+	incomingConnection <-chan string
 
 	advertiseCancel context.CancelFunc
+	advertiseResult chan error
 }
 
-func newInitializedDeviceTransport() deviceTransport {
+func newInitializedDeviceTransport(connectChan <-chan string) deviceTransport {
 	onboardingSvc := ble.NewService(ble.MustParse(OnboardingServiceUUID))
 	responseChar, response := NewSnapdResponseTransmit()
 	onboardingSvc.AddCharacteristic(responseChar)
-	onboardingSvc.AddCharacteristic(NewSnapdDeviceChar())
 	requestChar, request := NewSnapdRequestTransmit()
 	onboardingSvc.AddCharacteristic(requestChar)
+	deviceChar, dev := NewSnapdDeviceChar()
+	onboardingSvc.AddCharacteristic(deviceChar)
 
 	if err := ble.AddService(onboardingSvc); err != nil {
 		log.Fatalf("can't add service: %s", err)
 	}
 	return &bleDeviceTransport{
-		rsp: response,
-		req: request,
+		rsp:                response,
+		req:                request,
+		dev:                dev,
+		incomingConnection: connectChan,
+		advertiseResult:    make(chan error),
 	}
 }
 
 func (b *bleDeviceTransport) Advertise() error {
+	log.Tracef("advertising...")
 	ctx, cancel := context.WithCancel(context.Background())
-	err := ble.AdvertiseNameAndServices(ctx, "Ubuntu Core", ble.MustParse(OnboardingServiceUUID))
-	if err != nil {
-		cancel()
-		return err
-	}
 	b.advertiseCancel = cancel
+	go func() {
+		err := ble.AdvertiseNameAndServices(ctx, "Ubuntu Core", ble.MustParse(OnboardingServiceUUID))
+		if err != nil {
+			log.Tracef("advertising failed")
+			cancel()
+		}
+		b.advertiseResult <- err
+	}()
 	return nil
 }
 func (b *bleDeviceTransport) Hide() {
+	log.Tracef("stop advertising")
 	if b.advertiseCancel != nil {
 		b.advertiseCancel()
 	}
+	err := <-b.advertiseResult
+	if err != nil {
+		log.Tracef("advertising err: %v", err)
+	}
 }
 
-func (b *bleDeviceTransport) WaitConnected() ([]byte, error) { return nil, nil }
+func (b *bleDeviceTransport) WaitConnected() (string, error) {
+	log.Tracef("wait for connection")
+	peer := <-b.incomingConnection
+	log.Tracef("got connection from %s", peer)
+	return peer, nil
+}
 
-func (b *bleDeviceTransport) Disconnect(peer []byte)        {}
-func (b *bleDeviceTransport) NotifyState(state State) error { return nil }
+func (b *bleDeviceTransport) Disconnect(peer []byte) {
+	// XXX
+}
 
-func (b *bleDeviceTransport) Send([]byte) error { return nil }
+func (b *bleDeviceTransport) NotifyState(state State) error {
+	log.Tracef("notify state change to %v", state)
+	b.dev.setState(state)
+	return nil
+}
 
-func (b *bleDeviceTransport) Receive(ctx context.Context) ([]byte, error) { return nil, nil }
+func (b *bleDeviceTransport) Send(data []byte) error {
+	log.Tracef("send %v bytes of data", len(data))
+	b.rsp.transmitData(data)
+	return nil
+}
+
+func (b *bleDeviceTransport) PrepareReceive() error {
+	log.Tracef("prepare receive")
+	b.req.reset()
+	return nil
+}
+
+func (b *bleDeviceTransport) Receive(ctx context.Context) ([]byte, error) {
+	dataChan := make(chan []byte, 1)
+	b.req.waitForReady(func(data []byte) {
+		log.Tracef("got %v bytes ready", len(data))
+		dataChan <- data
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case data := <-dataChan:
+		return data, nil
+	}
+}

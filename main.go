@@ -16,9 +16,14 @@ func main() {
 		FullTimestamp: true,
 	})
 
+	connectionChan := make(chan string)
+
 	dev, err := ble_linux.NewDeviceWithName("snapd",
 		ble.OptConnectHandler(func(e evt.LEConnectionComplete) {
 			log.Infof("connect handler, peer: %x handle: %v", e.PeerAddress(), e.ConnectionHandle())
+			a := e.PeerAddress()
+			addr := fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", a[0], a[1], a[2], a[3], a[4], a[5])
+			connectionChan <- addr
 		}),
 		ble.OptDisconnectHandler(func(e evt.DisconnectionComplete) {
 			log.Infof("disconnected, handle: %v", e.ConnectionHandle())
@@ -48,7 +53,7 @@ func main() {
 		}
 		err = client(os.Args[2])
 	case "device":
-		fallthrough
+		err = runDevice(connectionChan)
 	case "configurator":
 		fallthrough
 	default:
