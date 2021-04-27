@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"time"
@@ -79,6 +81,53 @@ func client(hwaddr string) (err error) {
 		return fmt.Errorf("characteristic not found")
 	}
 
+	transmitChar := p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(UUIDBase + transmitCharHandle + UUIDSuffix)))
+	if transmitChar == nil {
+		return fmt.Errorf("transmit characteristic not found")
+	}
+	transmitDataSize := p.FindDescriptor(ble.NewDescriptor(ble.MustParse(UUIDBase + transmitSizeDescrHandle + UUIDSuffix)))
+	if transmitDataSize == nil {
+		return fmt.Errorf("cannot find transmit size descriptor")
+	}
+	transmitChunk := p.FindDescriptor(ble.NewDescriptor(ble.MustParse(UUIDBase + transmitChunkDescrHandle + UUIDSuffix)))
+	if transmitChunk == nil {
+		return fmt.Errorf("cannot find transmit chunk descriptor")
+	}
+	size, err := readUint32SizeFromDescriptor(cln, transmitDataSize)
+	if err != nil {
+		return fmt.Errorf("cannot read size: %v", err)
+	}
+	log.Infof("data size: %v", size)
+
+	cln.Subscribe(transmitChar, false, ble.NotificationHandler(func(req []byte) {
+		log.Tracef("got req: %x", req)
+	}))
+
+	data := make([]byte, 0, size)
+	got := uint32(0)
+	// read file
+	if err := cln.WriteCharacteristic(transmitChar, asUint32Size(0), false); err != nil {
+		return fmt.Errorf("cannot rewind: %v", err)
+	}
+	for {
+		currentData, err := cln.ReadCharacteristic(transmitChar)
+		if err != nil {
+			return fmt.Errorf("cannot read characteristic: %v", err)
+		}
+		data = append(data, currentData...)
+		chunkOffset, err := readUint32SizeFromDescriptor(cln, transmitChunk)
+		if err != nil {
+			return fmt.Errorf("cannot read chunk: %v", err)
+		}
+		log.Tracef("chunk offset: %v", chunkOffset)
+		got += uint32(len(currentData))
+		if got == size {
+			log.Infof("got everything")
+			log.Tracef("data:\n%s", string(data))
+			break
+		}
+	}
+
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
@@ -93,4 +142,30 @@ func client(hwaddr string) (err error) {
 	}
 
 	return nil
+}
+
+func readUint32SizeFromDescriptor(cln ble.Client, desc *ble.Descriptor) (val uint32, err error) {
+	sizeRaw, err := cln.ReadDescriptor(desc)
+	if err != nil {
+		return 0, fmt.Errorf("cannot read descriptor value: %v", err)
+	}
+	size, err := readUint32Size(sizeRaw)
+	if err != nil {
+		return 0, fmt.Errorf("cannot convert value: %v", err)
+	}
+	log.Tracef("value: %v", size)
+	return size, nil
+}
+
+func readUint32Size(data []byte) (val uint32, err error) {
+	if err := binary.Read(bytes.NewBuffer(data), binary.LittleEndian, &val); err != nil {
+		return 0, err
+	}
+	return val, nil
+}
+
+func asUint32Size(val uint32) []byte {
+	buf := &bytes.Buffer{}
+	binary.Write(buf, binary.LittleEndian, val)
+	return buf.Bytes()
 }
