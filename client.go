@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-ble/ble"
@@ -216,6 +217,237 @@ func sendData(cln ble.Client, mtu int, data []byte) error {
 		if start == len(data) && len(chunk) == 0 {
 			log.Tracef("all done")
 			break
+		}
+	}
+	return nil
+}
+
+func runConfigurator(addr string) error {
+	ct := newConfiguratorTransport()
+	cfg := NewConfiguratorFor(addr, ct)
+	return cfg.Configure()
+}
+
+type bleConfiguratorTransport struct {
+	c   ble.Client
+	mtu uint
+
+	onboardingService *ble.Service
+
+	// configurator -> dev
+	requestChar     *ble.Characteristic
+	requestSizeDesc *ble.Descriptor
+
+	// dev -> configurator
+	responseChar       *ble.Characteristic
+	responseSizeDesc   *ble.Descriptor
+	responseOffsetDesc *ble.Descriptor
+
+	onboardingChar  *ble.Characteristic
+	stateDesc       *ble.Descriptor
+	currentState    State
+	stateLock       sync.Mutex
+	stateNotifyFunc func(State) (clear bool)
+}
+
+func newConfiguratorTransport() *bleConfiguratorTransport {
+	return &bleConfiguratorTransport{}
+}
+
+func hasOnboardingService(a ble.Advertisement) bool {
+	onboardingSvc := ble.MustParse(OnboardingServiceUUID)
+	found := false
+	for _, svc := range a.Services() {
+		if svc.Equal(onboardingSvc) {
+			found = true
+			break
+		}
+	}
+	return found
+}
+
+func (b *bleConfiguratorTransport) Connect(addr string) error {
+	ctx := ble.WithSigHandler(context.WithTimeout(context.Background(), scanTimeout))
+
+	filter := func(a ble.Advertisement) bool {
+		log.Debugf("found device: %v (%v)", a.Addr(), a.LocalName())
+		hasOnboarding := hasOnboardingService(a)
+		addressMatch := strings.ToLower(a.Addr().String()) == addr
+		if addressMatch && !hasOnboarding {
+			log.Warnf("matching MAC but no onboarding service")
+		}
+		return addressMatch
+	}
+
+	cln, err := ble.Connect(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("cannot connect to %s: %v", addr, err)
+	}
+	b.c = cln
+
+	log.Infof("discovering profiles")
+	p, err := b.c.DiscoverProfile(true)
+	if err != nil {
+		return fmt.Errorf("cannot discover profiles: %v", err)
+	}
+
+	log.Tracef("changing MTU to %v", MTU)
+	txMtu, err := b.c.ExchangeMTU(MTU)
+	if err != nil {
+		return fmt.Errorf("cannot change MTU: %v", err)
+	}
+	log.Infof("MTU: %v\n", txMtu)
+	if txMtu != MTU {
+		log.Warnf("got different MTU %v", txMtu)
+	}
+	b.mtu = uint(txMtu)
+
+	onboardingService := ble.NewService(ble.MustParse(OnboardingServiceUUID))
+	srv := p.FindService(onboardingService)
+	if srv == nil {
+		log.Warnf("service not found")
+		return nil
+	}
+
+	b.onboardingService = srv
+
+	snapdChar := p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(OnboardingCharUUID)))
+	if snapdChar == nil {
+		return fmt.Errorf("characteristic not found")
+	}
+
+	b.responseChar = p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(ResponseCharUUID)))
+	if b.responseChar == nil {
+		return fmt.Errorf("cannot find response characteristic")
+	}
+	b.responseSizeDesc = p.FindDescriptor(ble.NewDescriptor(ble.MustParse(ResponsePropSizeUUID)))
+	if b.responseSizeDesc == nil {
+		return fmt.Errorf("cannot find response size descriptor")
+	}
+	b.responseOffsetDesc = p.FindDescriptor(ble.NewDescriptor(ble.MustParse(ResponsePropChunkStartUUID)))
+	if b.responseOffsetDesc == nil {
+		return fmt.Errorf("cannot find response offset descriptor")
+	}
+
+	b.requestChar = p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(RequestCharUUID)))
+	if b.requestChar == nil {
+		return fmt.Errorf("cannot find request transmit characteristic")
+	}
+	b.requestSizeDesc = p.FindDescriptor(ble.NewDescriptor(ble.MustParse(RequestSizePropUUID)))
+	if b.requestSizeDesc == nil {
+		return fmt.Errorf("cannot find request transmit size descriptor")
+	}
+
+	b.onboardingChar = p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(OnboardingCharUUID)))
+	if b.onboardingChar == nil {
+		return fmt.Errorf("cannot find onboarding characteristic")
+	}
+	b.stateDesc = p.FindDescriptor(ble.NewDescriptor(ble.MustParse(OnboardingStatePropUUID)))
+	if b.stateDesc == nil {
+		return fmt.Errorf("cannot find onboarding state descriptor")
+	}
+	b.c.Subscribe(b.onboardingChar, false, ble.NotificationHandler(func(req []byte) {
+		b.stateLock.Lock()
+		defer b.stateLock.Unlock()
+
+		log.Tracef("got req: %x", req)
+		newState, err := readUint32Size(req)
+		if err != nil {
+			log.Errorf("cannot unpack new offset: %v", err)
+			return
+		}
+		log.Tracef("state change: %v -> %v", b.currentState, newState)
+		b.currentState = State(newState)
+		if b.stateNotifyFunc != nil && b.stateNotifyFunc(b.currentState) {
+			b.stateNotifyFunc = nil
+		}
+	}))
+
+	return nil
+}
+func (b *bleConfiguratorTransport) Disconnect() error {
+	if b.c == nil {
+		return nil
+	}
+	log.Infof("disconnecting from %v", b.c.Addr())
+	if err := b.c.CancelConnection(); err != nil {
+		return fmt.Errorf("cannot disconnect: %v", err)
+	}
+	<-b.c.Disconnected()
+	log.Warnf("disconnected...")
+	return nil
+}
+
+func (b *bleConfiguratorTransport) Send(data []byte) error {
+	return sendData(b.c, int(b.mtu), data)
+}
+
+func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
+	size, err := readUint32SizeFromDescriptor(b.c, b.responseSizeDesc)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read response size: %v", err)
+	}
+	log.Infof("response size: %v", size)
+
+	// rewind
+	if err := b.c.WriteCharacteristic(b.responseChar, asUint32Size(0), false); err != nil {
+		return nil, fmt.Errorf("cannot rewind: %v", err)
+	}
+	data := make([]byte, 0, size)
+	got := uint32(0)
+
+	for {
+		// XXX: use ReadLongCharacteristic once server supports ReadBlob?
+		currentData, err := b.c.ReadCharacteristic(b.responseChar)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read characteristic: %v", err)
+		}
+		data = append(data, currentData...)
+		log.Tracef("got %v bytes", len(currentData))
+		// XXX: do we need this?
+		chunkOffset, err := readUint32SizeFromDescriptor(b.c, b.responseOffsetDesc)
+		if err != nil {
+			return nil, fmt.Errorf("cannot read chunk: %v", err)
+		}
+		log.Tracef("chunk offset: %v", chunkOffset)
+
+		got += uint32(len(currentData))
+		log.Tracef("got: %v", got)
+		if got == size {
+			log.Infof("got everything")
+			log.Tracef("data:\n%s", string(data))
+			break
+		}
+	}
+	return data, nil
+}
+
+func (b *bleConfiguratorTransport) WaitForState(ctx context.Context, state State) error {
+	b.stateLock.Lock()
+
+	log.Tracef("wait for state %v (current %v)", state, b.currentState)
+	if b.currentState == state {
+		b.stateLock.Unlock()
+		return nil
+	}
+
+	inExpectedState := make(chan struct{}, 1)
+
+	b.stateNotifyFunc = func(newState State) (clear bool) {
+		if newState == state {
+			inExpectedState <- struct{}{}
+			return true
+		}
+		return false
+	}
+	b.stateLock.Unlock()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-inExpectedState:
+			log.Tracef("reached state %v", state)
 		}
 	}
 	return nil

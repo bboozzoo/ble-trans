@@ -21,6 +21,7 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"time"
 
@@ -35,7 +36,7 @@ const (
 	StateSessionSetup
 	StateReady
 
-	WaitTimeout = 5 * time.Second
+	WaitTimeout = 30 * time.Second
 )
 
 type configuratorTransport interface {
@@ -50,6 +51,9 @@ type configurator struct {
 	device string
 	cfg    *netonboard.Configurator
 	t      configuratorTransport
+
+	onbs      []byte
+	onbDevKey *ecdsa.PrivateKey
 }
 
 func NewConfiguratorFor(addr string, t configuratorTransport) *configurator {

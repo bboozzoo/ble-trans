@@ -55,9 +55,13 @@ func main() {
 	case "device":
 		err = runDevice(connectionChan)
 	case "configurator":
-		fallthrough
+		if len(os.Args) < 3 {
+			fmt.Fprintf(os.Stderr, "missing client address\n")
+			os.Exit(1)
+		}
+		err = runConfigurator(os.Args[2])
 	default:
-		err = fmt.Errorf("unknown action %q: try client/server", what)
+		err = fmt.Errorf("unknown action %q", what)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
