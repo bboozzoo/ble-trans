@@ -113,6 +113,7 @@ func (s *snapdChar) written(req ble.Request, rsp ble.ResponseWriter) {
 	data := req.Data()
 	log.Tracef("got data: %x", data)
 	log.Tracef("          %q", string(data))
+	log.Tracef("          offset: %v", req.Offset())
 }
 
 // func (s *snapdChar) echo(req ble.Request, n ble.Notifier) {
