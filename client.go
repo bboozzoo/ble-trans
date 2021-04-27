@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"strings"
 	"time"
 
 	"github.com/go-ble/ble"
 
 	log "github.com/sirupsen/logrus"
+	// "github.com/mvo5/ble-trans/netonboard"
 )
 
 var (
@@ -76,7 +78,7 @@ func client(hwaddr string) (err error) {
 		return nil
 	}
 
-	snapdChar := p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(UUIDBase + commCharHandle + UUIDSuffix)))
+	snapdChar := p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(UUIDBase + onboardingCharHandle + UUIDSuffix)))
 	if snapdChar == nil {
 		return fmt.Errorf("characteristic not found")
 	}
@@ -137,6 +139,14 @@ func client(hwaddr string) (err error) {
 		}
 	}
 
+	toSendData, err := ioutil.ReadFile("client.go")
+	if err != nil {
+		return fmt.Errorf("cannot read file: %v", err)
+	}
+	if err := sendData(cln, 200, toSendData); err != nil {
+		return fmt.Errorf("cannot send data: %v", err)
+	}
+
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
@@ -177,4 +187,36 @@ func asUint32Size(val uint32) []byte {
 	buf := &bytes.Buffer{}
 	binary.Write(buf, binary.LittleEndian, val)
 	return buf.Bytes()
+}
+
+func sendData(cln ble.Client, mtu int, data []byte) error {
+	p := cln.Profile()
+	char := p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(UUIDBase + transmitRequestCharHandle + UUIDSuffix)))
+	desc := p.FindDescriptor(ble.NewDescriptor(ble.MustParse(UUIDBase + transmitRequestSizeDescrHandle + UUIDSuffix)))
+
+	log.Tracef("send %v bytes of data", len(data))
+	start := 0
+	for {
+		count := mtu
+		if start+count > len(data) {
+			count = len(data) - start
+		}
+		chunk := data[start : start+count]
+		log.Tracef("sending %v bytes, offset %v/%v", len(chunk), start, len(data))
+		if err := cln.WriteCharacteristic(char, chunk, false); err != nil {
+			log.Errorf("cannot send: %v", err)
+			return err
+		}
+		start += len(chunk)
+		size, err := readUint32SizeFromDescriptor(cln, desc)
+		if err != nil {
+			return fmt.Errorf("cannot read size: %v", err)
+		}
+		log.Tracef("size at client: %v", size)
+		if start == len(data) && len(chunk) == 0 {
+			log.Tracef("all done")
+			break
+		}
+	}
+	return nil
 }
