@@ -124,14 +124,6 @@ func (s *snapdDeviceChar) written(req ble.Request, rsp ble.ResponseWriter) {
 // notify
 // }
 
-type OnboardingState int
-
-const (
-	StateWaitHello OnboardingState = iota + 1
-	StateWaitSessionSetup
-	StateWaitReady
-)
-
 func (s *snapdDeviceChar) readProtocolState(req ble.Request, rsp ble.ResponseWriter) {
 
 }
