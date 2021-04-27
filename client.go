@@ -224,7 +224,10 @@ func sendData(cln ble.Client, mtu int, data []byte) error {
 
 func runConfigurator(addr string) error {
 	ct := newConfiguratorTransport()
-	cfg := NewConfiguratorFor(addr, ct)
+	cfg, err := NewConfiguratorFor(addr, ct)
+	if err != nil {
+		return err
+	}
 	return cfg.Configure()
 }
 
@@ -297,10 +300,7 @@ func (b *bleConfiguratorTransport) Connect(addr string) error {
 		return fmt.Errorf("cannot change MTU: %v", err)
 	}
 	log.Infof("MTU: %v\n", txMtu)
-	if txMtu != MTU {
-		log.Warnf("got different MTU %v", txMtu)
-	}
-	b.mtu = uint(txMtu)
+	b.mtu = uint(MTU)
 
 	onboardingService := ble.NewService(ble.MustParse(OnboardingServiceUUID))
 	srv := p.FindService(onboardingService)
@@ -350,7 +350,7 @@ func (b *bleConfiguratorTransport) Connect(addr string) error {
 		b.stateLock.Lock()
 		defer b.stateLock.Unlock()
 
-		log.Tracef("got req: %x", req)
+		log.Tracef("got state notify: %x", req)
 		newState, err := readUint32Size(req)
 		if err != nil {
 			log.Errorf("cannot unpack new offset: %v", err)
@@ -393,6 +393,7 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 	if err := b.c.WriteCharacteristic(b.responseChar, asUint32Size(0), false); err != nil {
 		return nil, fmt.Errorf("cannot rewind: %v", err)
 	}
+	log.Tracef("rewind done")
 	data := make([]byte, 0, size)
 	got := uint32(0)
 
@@ -442,12 +443,14 @@ func (b *bleConfiguratorTransport) WaitForState(ctx context.Context, state State
 	}
 	b.stateLock.Unlock()
 
+forLoop:
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-inExpectedState:
 			log.Tracef("reached state %v", state)
+			break forLoop
 		}
 	}
 	return nil

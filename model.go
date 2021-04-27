@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mvo5/ble-trans/netonboard"
@@ -37,6 +38,10 @@ const (
 	StateReady
 
 	WaitTimeout = 30 * time.Second
+)
+
+var (
+	secret = []byte(strings.Repeat("a", 32))
 )
 
 type configuratorTransport interface {
@@ -56,12 +61,17 @@ type configurator struct {
 	onbDevKey *ecdsa.PrivateKey
 }
 
-func NewConfiguratorFor(addr string, t configuratorTransport) *configurator {
+func NewConfiguratorFor(addr string, t configuratorTransport) (*configurator, error) {
+	cfg := &netonboard.Configurator{}
+	if err := cfg.SetOnboardingSecret(secret); err != nil {
+		return nil, fmt.Errorf("cannot set secret: %v", err)
+	}
+
 	return &configurator{
 		device: addr,
-		cfg:    &netonboard.Configurator{},
+		cfg:    cfg,
 		t:      t,
-	}
+	}, nil
 }
 
 func (c *configurator) Configure() error {
@@ -138,11 +148,22 @@ type device struct {
 	dev *netonboard.Device
 }
 
-func NewDevice(t deviceTransport) *device {
+func NewDevice(t deviceTransport) (*device, error) {
+	dev := &netonboard.Device{}
+	if err := dev.SetOnboardingSecret(secret); err != nil {
+		return nil, fmt.Errorf("cannot set onbording secret: %v", err)
+	}
+	onbDevKey, err := netonboard.GenDeviceKey()
+	if err != nil {
+		return nil, fmt.Errorf("cannot generate device key: %v", err)
+	}
+	if err := dev.SetOnboardingDeviceKey(onbDevKey); err != nil {
+		return nil, fmt.Errorf("cannot set onboarding device key: %v", err)
+	}
 	return &device{
 		t:   t,
-		dev: &netonboard.Device{},
-	}
+		dev: dev,
+	}, nil
 }
 
 func (d *device) WaitForConfiguration() error {
@@ -156,7 +177,7 @@ func (d *device) WaitForConfiguration() error {
 	fmt.Printf("connection from peer: %s\n", peer)
 
 	// stop announcing
-	d.t.Hide()
+	// d.t.Hide()
 
 	ctx, cancel := context.WithTimeout(context.Background(), WaitTimeout)
 	defer cancel()
@@ -182,7 +203,7 @@ func (d *device) WaitForConfiguration() error {
 
 	setupMsg, err := d.t.Receive(ctx)
 	if err != nil {
-		return fmt.Errorf("cannot receive 'hello' message: %v", err)
+		return fmt.Errorf("cannot receive 'session-setup' message: %v", err)
 	}
 
 	if err := d.dev.RcvSessionSetup(setupMsg); err != nil {

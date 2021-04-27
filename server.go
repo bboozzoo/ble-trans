@@ -80,12 +80,12 @@ func NewSnapdDeviceChar() (*ble.Characteristic, *snapdDeviceChar) {
 	}
 	c.HandleRead(ble.ReadHandlerFunc(s.read))
 	c.HandleWrite(ble.WriteHandlerFunc(s.written))
+	c.HandleNotify(ble.NotifyHandlerFunc(s.notifyProtocolState))
 	d := &ble.Descriptor{
 		UUID: ble.MustParse(OnboardingStatePropUUID),
 	}
 	c.AddDescriptor(d)
 	d.HandleRead(ble.ReadHandlerFunc(s.readProtocolState))
-	c.HandleNotify(ble.NotifyHandlerFunc(s.notifyProtocolState))
 	return c, &s
 }
 
@@ -135,8 +135,9 @@ func (s *snapdDeviceChar) notifyProtocolState(req ble.Request, n ble.Notifier) {
 	for {
 		select {
 		case state := <-s.stateChange:
+			log.Tracef("dev: notify state change to %v", state)
 			if err := binary.Write(n, binary.LittleEndian, state); err != nil {
-				log.Errorf("req: cannot write current chunk size: %v", err)
+				log.Errorf("dev: cannot write current chunk size: %v", err)
 			}
 		}
 	}
@@ -144,7 +145,7 @@ func (s *snapdDeviceChar) notifyProtocolState(req ble.Request, n ble.Notifier) {
 
 func (s *snapdDeviceChar) readProtocolState(req ble.Request, rsp ble.ResponseWriter) {
 	if err := binary.Write(rsp, binary.LittleEndian, s.state); err != nil {
-		log.Errorf("req: cannot write current chunk size: %v", err)
+		log.Errorf("dev: cannot write current chunk size: %v", err)
 	}
 }
 
@@ -168,7 +169,7 @@ func NewSnapdResponseTransmit() (*ble.Characteristic, *snapdResponseTransmit) {
 	}
 	c.HandleRead(ble.ReadHandlerFunc(s.readNextChunk))
 	c.HandleWrite(ble.WriteHandlerFunc(s.handleRewindTo))
-	c.HandleNotify(ble.NotifyHandlerFunc(s.notifyNewOffset))
+	// c.HandleNotify(ble.NotifyHandlerFunc(s.notifyNewOffset))
 	dSize := &ble.Descriptor{
 		UUID: ble.MustParse(ResponsePropSizeUUID),
 	}
@@ -200,12 +201,17 @@ func (s *snapdResponseTransmit) chunk(size uint32) ([]byte, uint32) {
 }
 
 func (s *snapdResponseTransmit) advanceChunk(size uint32) (start uint32, complete bool) {
-	if s.currentChunkStart+size > s.currentSize {
+	defer func() {
+		log.Tracef("advance, start: %v complete: %v", start, complete)
+	}()
+	log.Tracef("advance called")
+	if s.currentChunkStart+size >= s.currentSize {
 		s.currentChunkStart = s.currentSize
+		log.Tracef("sending complete")
 		return s.currentChunkStart, true
 	}
 	s.currentChunkStart += size
-	s.chunkStartChange <- s.currentChunkStart
+	// s.chunkStartChange <- s.currentChunkStart
 	return s.currentChunkStart, false
 }
 
@@ -213,7 +219,7 @@ func (s *snapdResponseTransmit) rewindTo(start uint32) {
 	// XXX range check
 	log.Tracef("rsp: rewind to: %v", start)
 	s.currentChunkStart = start
-	s.chunkStartChange <- start
+	// s.chunkStartChange <- start
 }
 
 func (s *snapdResponseTransmit) readNextChunk(req ble.Request, rsp ble.ResponseWriter) {
@@ -246,9 +252,11 @@ func (s *snapdResponseTransmit) readNextChunk(req ble.Request, rsp ble.ResponseW
 	n, err := rsp.Write(contentToSend)
 	log.Tracef("rsp: sent, %v/%v bytes, err: %v", n, len(contentToSend), err)
 	if err != nil {
+		log.Errorf("rsp: writing failed: %v", err)
 		return
 	}
 	if req.Offset()+n == len(chunk) {
+		log.Tracef("chunk done")
 		// whole chunk was read, advance
 		next, done := s.advanceChunk(uint32(len(chunk)))
 		if !done {
@@ -288,13 +296,15 @@ func (s *snapdResponseTransmit) handleRewindTo(req ble.Request, rsp ble.Response
 }
 
 func (s *snapdResponseTransmit) notifyNewOffset(req ble.Request, n ble.Notifier) {
+	log.Tracef("rsp: notify new offset")
 	for {
 		select {
 		case newStart, ok := <-s.chunkStartChange:
+			log.Tracef("rsp: notify new offset: %v (ok %v)", newStart, ok)
 			if !ok {
+				log.Tracef("chunk start change closed")
 				return
 			}
-			log.Tracef("rsp: notify new offset: %v", newStart)
 			if err := binary.Write(n, binary.LittleEndian, newStart); err != nil {
 				log.Errorf("rsp: cannot notify about new chunk offset: %v", err)
 			}
@@ -382,6 +392,7 @@ func (s *snapdRequestTransmit) reset() {
 func (s *snapdRequestTransmit) notifyReadCompleteLocked() {
 	if s.readyFunc != nil {
 		s.readyFunc(s.data)
+		s.readyFunc = nil
 	}
 }
 
@@ -399,7 +410,10 @@ func (s *snapdRequestTransmit) waitForReady(f func([]byte)) {
 
 func runDevice(connectChan <-chan string) error {
 	dt := newInitializedDeviceTransport(connectChan)
-	dev := NewDevice(dt)
+	dev, err := NewDevice(dt)
+	if err != nil {
+		return err
+	}
 	return dev.WaitForConfiguration()
 }
 
@@ -492,13 +506,14 @@ func (b *bleDeviceTransport) PrepareReceive() error {
 func (b *bleDeviceTransport) Receive(ctx context.Context) ([]byte, error) {
 	dataChan := make(chan []byte, 1)
 	b.req.waitForReady(func(data []byte) {
-		log.Tracef("got %v bytes ready", len(data))
 		dataChan <- data
 	})
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case data := <-dataChan:
+		log.Tracef("got %v bytes ready", len(data))
+		b.req.reset()
 		return data, nil
 	}
 }

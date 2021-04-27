@@ -16,7 +16,7 @@ func main() {
 		FullTimestamp: true,
 	})
 
-	connectionChan := make(chan string)
+	connectionChan := make(chan string, 10)
 
 	dev, err := ble_linux.NewDeviceWithName("snapd",
 		ble.OptConnectHandler(func(e evt.LEConnectionComplete) {
