@@ -36,7 +36,7 @@ func runServer(devName string) error {
 	}
 	responseChar, response := NewSnapdResponseTransmit()
 	onboardingSvc.AddCharacteristic(responseChar)
-	response.transmitData(data)
+	response.transmitData(data, nil)
 	devChar, _ := NewSnapdDeviceChar()
 	onboardingSvc.AddCharacteristic(devChar)
 	requestChar, _ := NewSnapdRequestTransmit()
@@ -156,6 +156,7 @@ type snapdResponseTransmit struct {
 	currentChunkStart uint32
 	currentSize       uint32
 	chunkStartChange  chan uint32
+	dataSentFunc      func()
 
 	lock sync.Mutex
 }
@@ -183,12 +184,13 @@ func NewSnapdResponseTransmit() (*ble.Characteristic, *snapdResponseTransmit) {
 	return c, &s
 }
 
-func (s *snapdResponseTransmit) transmitData(data []byte) {
+func (s *snapdResponseTransmit) transmitData(data []byte, notify func()) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.data = data
 	s.currentSize = uint32(len(data))
 	s.currentChunkStart = 0
+	s.dataSentFunc = notify
 }
 
 func (s *snapdResponseTransmit) chunk(size uint32) ([]byte, uint32) {
@@ -264,6 +266,10 @@ func (s *snapdResponseTransmit) readNextChunk(req ble.Request, rsp ble.ResponseW
 		} else {
 			log.Tracef("rsp: transfer done")
 			s.rewindTo(0)
+			if notify := s.dataSentFunc; notify != nil {
+				s.dataSentFunc = nil
+				notify()
+			}
 		}
 	}
 }
@@ -414,7 +420,11 @@ func runDevice(connectChan <-chan string) error {
 	if err != nil {
 		return err
 	}
-	return dev.WaitForConfiguration()
+	if err := dev.WaitForConfiguration(); err != nil {
+		return fmt.Errorf("wait for configuration failed: %v", err)
+	}
+	log.Tracef("configured, looping...")
+	select {}
 }
 
 type bleDeviceTransport struct {
@@ -491,10 +501,21 @@ func (b *bleDeviceTransport) NotifyState(state State) error {
 	return nil
 }
 
-func (b *bleDeviceTransport) Send(data []byte) error {
+func (b *bleDeviceTransport) Send(data []byte) (waitFunc, error) {
 	log.Tracef("send %v bytes of data", len(data))
-	b.rsp.transmitData(data)
-	return nil
+	sentChan := make(chan struct{}, 1)
+	b.rsp.transmitData(data, func() {
+		sentChan <- struct{}{}
+	})
+
+	return func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-sentChan:
+			return nil
+		}
+	}, nil
 }
 
 func (b *bleDeviceTransport) PrepareReceive() error {

@@ -228,7 +228,11 @@ func runConfigurator(addr string) error {
 	if err != nil {
 		return err
 	}
-	return cfg.Configure()
+	if err := cfg.Configure(); err != nil {
+		return fmt.Errorf("cannot configure: %v", err)
+	}
+	log.Infof("device configured")
+	return nil
 }
 
 type bleConfiguratorTransport struct {

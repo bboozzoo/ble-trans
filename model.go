@@ -132,13 +132,15 @@ func (c *configurator) Configure() error {
 	return nil
 }
 
+type waitFunc func(context.Context) error
+
 type deviceTransport interface {
 	Advertise() error
 	Hide()
 	WaitConnected() (peer string, err error)
 	Disconnect(peer []byte)
 	NotifyState(state State) error
-	Send([]byte) error
+	Send([]byte) (waitFunc, error)
 	PrepareReceive() error
 	Receive(ctx context.Context) ([]byte, error)
 }
@@ -194,11 +196,17 @@ func (d *device) WaitForConfiguration() error {
 	if err != nil {
 		return fmt.Errorf("cannot generate 'device' message: %v", err)
 	}
-	if err := d.t.Send(devMsg); err != nil {
+	wait, err := d.t.Send(devMsg)
+	if err != nil {
 		return fmt.Errorf("cannot send 'device' message")
 	}
 	if err := d.t.NotifyState(StateDevice); err != nil {
 		return fmt.Errorf("cannot announce new state: %v", err)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), WaitTimeout)
+	defer cancel()
+	if err := wait(ctx); err != nil {
+		return fmt.Errorf("cannot wait for 'device' message to be sent: %v", err)
 	}
 
 	setupMsg, err := d.t.Receive(ctx)
@@ -214,12 +222,20 @@ func (d *device) WaitForConfiguration() error {
 	if err != nil {
 		return fmt.Errorf("cannot generate 'ready' message: %v", err)
 	}
-	if err := d.t.Send(readyMsg); err != nil {
+
+	wait, err = d.t.Send(readyMsg)
+	if err != nil {
 		return fmt.Errorf("cannot send 'ready' message: %v", err)
 	}
 
 	if err := d.t.NotifyState(StateReady); err != nil {
 		return fmt.Errorf("cannot announce 'ready' state: %v", err)
+	}
+
+	ctx, cancel = context.WithTimeout(context.Background(), WaitTimeout)
+	defer cancel()
+	if err := wait(ctx); err != nil {
+		return fmt.Errorf("cannot wait for 'ready' message to be sent: %v", err)
 	}
 	return nil
 }
