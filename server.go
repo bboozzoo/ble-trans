@@ -455,7 +455,7 @@ func (s *snapdRequestTransmit) waitForReady(f func([]byte)) {
 	}
 }
 
-func runDevice(connectChan <-chan ConnectEvent, disconnectChan <-chan DisconnectEvent) error {
+func runDevice(connectChan <-chan ConnectEvent, disconnectChan <-chan DisconnectEvent, scenario string) error {
 	dt := newInitializedDeviceTransport(connectChan, disconnectChan)
 	dev, err := NewDevice(dt)
 	if err != nil {
@@ -465,7 +465,7 @@ func runDevice(connectChan <-chan ConnectEvent, disconnectChan <-chan Disconnect
 		// XXX: wait for connection
 		// XXX: wait for state reset?
 
-		if err := dev.WaitForConfiguration(); err != nil {
+		if err := dev.WaitForConfiguration(scenario); err != nil {
 			log.Errorf("wait for configuration failed: %v", err)
 			dt.SetError(err)
 		} else {

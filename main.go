@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -64,13 +65,21 @@ func main() {
 		}
 		err = client(os.Args[2])
 	case "device":
-		err = runDevice(connectChan, disconnectChan)
-	case "configurator":
 		if len(os.Args) < 3 {
-			fmt.Fprintf(os.Stderr, "missing client address\n")
+			fmt.Fprintf(os.Stderr, "missing scenario, try '1', '2'\n")
 			os.Exit(1)
 		}
-		err = runConfigurator(os.Args[2])
+		if err = loadSssids(); err != nil {
+			fmt.Fprintf(os.Stderr, "cannot load ssids list: %v", err)
+		} else {
+			err = runDevice(connectChan, disconnectChan, os.Args[2])
+		}
+	case "configurator":
+		if len(os.Args) < 4 {
+			fmt.Fprintf(os.Stderr, "missing client address and/or scenario (try '1', '2')\n")
+			os.Exit(1)
+		}
+		err = runConfigurator(os.Args[2], os.Args[3])
 	default:
 		err = fmt.Errorf("unknown action %q", what)
 	}
@@ -78,4 +87,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
+}
+
+func loadSssids() error {
+	f, err := os.Open("ssids.json")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := json.NewDecoder(f).Decode(&wifiSsids); err != nil {
+		return err
+	}
+	log.Tracef("got ssids: %v", wifiSsids)
+	return nil
 }

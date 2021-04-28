@@ -222,13 +222,13 @@ func sendData(cln ble.Client, mtu int, data []byte) error {
 	return nil
 }
 
-func runConfigurator(addr string) error {
+func runConfigurator(addr string, scenario string) error {
 	ct := newConfiguratorTransport()
 	cfg, err := NewConfiguratorFor(addr, ct)
 	if err != nil {
 		return err
 	}
-	if err := cfg.Configure(); err != nil {
+	if err := cfg.Configure(scenario); err != nil {
 		return fmt.Errorf("cannot configure: %v", err)
 	}
 	log.Infof("device configured")
@@ -426,7 +426,8 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 		// XXX: alternative check is: got == size
 		// verify if server detects transmission complete correctly if
 		// currentData == b.mtu and the next read is 0 length
-		if len(currentData) < int(b.mtu) {
+		// if len(currentData) < int(b.mtu) {
+		if got == size {
 			log.Infof("got everything")
 			log.Tracef("data:\n%s", string(data))
 			break
