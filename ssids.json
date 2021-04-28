@@ -54,15 +54,6 @@
     "security": "WPA2"
   },
   {
-    "bssid": "5E:49:79:36:1A:86",
-    "ssid": "Guest AB",
-    "mode": "Infra",
-    "channel": "1",
-    "rate": "195 Mbit/s",
-    "signal": "52",
-    "security": "WPA2"
-  },
-  {
     "bssid": "9C:D8:63:4D:BC:EC",
     "ssid": "8XXXA_242-724943",
     "mode": "Infra",
@@ -70,113 +61,5 @@
     "rate": "135 Mbit/s",
     "signal": "52",
     "security": "WPA2"
-  },
-  {
-    "bssid": "FE:65:DE:21:06:D6",
-    "ssid": "",
-    "mode": "Infra",
-    "channel": "6",
-    "rate": "130 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "5C:49:79:36:1A:87",
-    "ssid": "WXYNA",
-    "mode": "Infra",
-    "channel": "52",
-    "rate": "405 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "5E:49:79:36:1A:87",
-    "ssid": "Guesst AB",
-    "mode": "Infra",
-    "channel": "52",
-    "rate": "405 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "44:FE:3B:E7:36:F0",
-    "ssid": "WLAN-784733",
-    "mode": "Infra",
-    "channel": "108",
-    "rate": "540 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "44:FE:3B:E7:36:F3",
-    "ssid": "",
-    "mode": "Infra",
-    "channel": "108",
-    "rate": "540 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "46:FE:3B:E7:36:F0",
-    "ssid": "",
-    "mode": "Infra",
-    "channel": "108",
-    "rate": "540 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "46:FE:3B:E7:36:F1",
-    "ssid": "",
-    "mode": "Infra",
-    "channel": "108",
-    "rate": "540 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "46:FE:3B:E7:36:F2",
-    "ssid": "",
-    "mode": "Infra",
-    "channel": "108",
-    "rate": "540 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "46:FE:3B:E7:36:F3",
-    "ssid": "",
-    "mode": "Infra",
-    "channel": "108",
-    "rate": "540 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "60:E3:27:CD:59:DA",
-    "ssid": "N2Meep",
-    "mode": "Infra",
-    "channel": "128",
-    "rate": "270 Mbit/s",
-    "signal": "35",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "68:FF:7B:F0:74:A2",
-    "ssid": "Hhome",
-    "mode": "Infra",
-    "channel": "11",
-    "rate": "270 Mbit/s",
-    "signal": "32",
-    "security": "WPA2"
-  },
-  {
-    "bssid": "50:D4:F7:76:00:32",
-    "ssid": "Bohly_2.4GEXT",
-    "mode": "Infra",
-    "channel": "1",
-    "rate": "130 Mbit/s",
-    "signal": "29",
-    "security": "WPA1 WPA2"
   }
 ]

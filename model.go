@@ -207,7 +207,7 @@ func (c *configurator) scenario1() error {
 	if err != nil {
 		return fmt.Errorf("cannot process 'ready' message: %v", err)
 	}
-	log.Infof("secure transport established")
+	log.Infof("secure session established")
 
 	log.Infof("device data:\n%s", prettyJson(d))
 
@@ -290,7 +290,7 @@ func (c *configurator) scenario2() error {
 	if err != nil {
 		return fmt.Errorf("cannot process 'ready' message: %v", err)
 	}
-	log.Infof("secure transport established")
+	log.Infof("secure session established")
 
 	log.Infof("device data:\n%s", prettyJson(d))
 	wifiNet, err := extractFirstNetwork(d["wifi.ssids"])
