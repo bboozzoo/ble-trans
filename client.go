@@ -96,7 +96,7 @@ func client(hwaddr string) (err error) {
 	if transmitChunk == nil {
 		return fmt.Errorf("cannot find transmit chunk descriptor")
 	}
-	size, err := readUint32SizeFromDescriptor(cln, transmitDataSize)
+	size, err := readUint32FromDescriptor(cln, transmitDataSize)
 	if err != nil {
 		return fmt.Errorf("cannot read size: %v", err)
 	}
@@ -104,7 +104,7 @@ func client(hwaddr string) (err error) {
 
 	cln.Subscribe(transmitChar, false, ble.NotificationHandler(func(req []byte) {
 		log.Tracef("got req: %x", req)
-		offset, err := readUint32Size(req)
+		offset, err := readUint32FromRawBytes(req)
 		if err != nil {
 			log.Errorf("cannot unpack new offset: %v", err)
 			return
@@ -126,7 +126,7 @@ func client(hwaddr string) (err error) {
 		}
 		data = append(data, currentData...)
 		log.Tracef("got %v bytes", len(currentData))
-		chunkOffset, err := readUint32SizeFromDescriptor(cln, transmitChunk)
+		chunkOffset, err := readUint32FromDescriptor(cln, transmitChunk)
 		if err != nil {
 			return fmt.Errorf("cannot read chunk: %v", err)
 		}
@@ -164,12 +164,12 @@ func client(hwaddr string) (err error) {
 	return nil
 }
 
-func readUint32SizeFromDescriptor(cln ble.Client, desc *ble.Descriptor) (val uint32, err error) {
+func readUint32FromDescriptor(cln ble.Client, desc *ble.Descriptor) (val uint32, err error) {
 	sizeRaw, err := cln.ReadDescriptor(desc)
 	if err != nil {
 		return 0, fmt.Errorf("cannot read descriptor value: %v", err)
 	}
-	size, err := readUint32Size(sizeRaw)
+	size, err := readUint32FromRawBytes(sizeRaw)
 	if err != nil {
 		return 0, fmt.Errorf("cannot convert value: %v", err)
 	}
@@ -177,7 +177,7 @@ func readUint32SizeFromDescriptor(cln ble.Client, desc *ble.Descriptor) (val uin
 	return size, nil
 }
 
-func readUint32Size(data []byte) (val uint32, err error) {
+func readUint32FromRawBytes(data []byte) (val uint32, err error) {
 	if err := binary.Read(bytes.NewBuffer(data), binary.LittleEndian, &val); err != nil {
 		return 0, err
 	}
@@ -192,8 +192,8 @@ func asUint32Size(val uint32) []byte {
 
 func sendData(cln ble.Client, mtu int, data []byte) error {
 	p := cln.Profile()
-	char := p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(UUIDBase + transmitRequestCharHandle + UUIDSuffix)))
-	desc := p.FindDescriptor(ble.NewDescriptor(ble.MustParse(UUIDBase + transmitRequestSizeDescrHandle + UUIDSuffix)))
+	char := p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(RequestCharUUID)))
+	desc := p.FindDescriptor(ble.NewDescriptor(ble.MustParse(RequestSizePropUUID)))
 
 	log.Tracef("send %v bytes of data", len(data))
 	start := 0
@@ -209,7 +209,7 @@ func sendData(cln ble.Client, mtu int, data []byte) error {
 			return err
 		}
 		start += len(chunk)
-		size, err := readUint32SizeFromDescriptor(cln, desc)
+		size, err := readUint32FromDescriptor(cln, desc)
 		if err != nil {
 			return fmt.Errorf("cannot read size: %v", err)
 		}
@@ -325,11 +325,11 @@ func (b *bleConfiguratorTransport) Connect(addr string) error {
 	if b.responseChar == nil {
 		return fmt.Errorf("cannot find response characteristic")
 	}
-	b.responseSizeDesc = p.FindDescriptor(ble.NewDescriptor(ble.MustParse(ResponsePropSizeUUID)))
+	b.responseSizeDesc = p.FindDescriptor(ble.NewDescriptor(ble.MustParse(ResponseSizePropUUID)))
 	if b.responseSizeDesc == nil {
 		return fmt.Errorf("cannot find response size descriptor")
 	}
-	b.responseOffsetDesc = p.FindDescriptor(ble.NewDescriptor(ble.MustParse(ResponsePropChunkStartUUID)))
+	b.responseOffsetDesc = p.FindDescriptor(ble.NewDescriptor(ble.MustParse(ResponseChunkStartPropUUID)))
 	if b.responseOffsetDesc == nil {
 		return fmt.Errorf("cannot find response offset descriptor")
 	}
@@ -360,7 +360,7 @@ func (b *bleConfiguratorTransport) Connect(addr string) error {
 		defer b.stateLock.Unlock()
 
 		log.Tracef("got state notify: %x", req)
-		newState, err := readUint32Size(req)
+		newState, err := readUint32FromRawBytes(req)
 		if err != nil {
 			log.Errorf("cannot unpack new offset: %v", err)
 			return
@@ -392,7 +392,7 @@ func (b *bleConfiguratorTransport) Send(data []byte) error {
 }
 
 func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
-	size, err := readUint32SizeFromDescriptor(b.c, b.responseSizeDesc)
+	size, err := readUint32FromDescriptor(b.c, b.responseSizeDesc)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read response size: %v", err)
 	}
@@ -415,7 +415,7 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 		data = append(data, currentData...)
 		log.Tracef("got %v bytes", len(currentData))
 		// XXX: do we need this?
-		chunkOffset, err := readUint32SizeFromDescriptor(b.c, b.responseOffsetDesc)
+		chunkOffset, err := readUint32FromDescriptor(b.c, b.responseOffsetDesc)
 		if err != nil {
 			return nil, fmt.Errorf("cannot read chunk: %v", err)
 		}
@@ -423,7 +423,10 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 
 		got += uint32(len(currentData))
 		log.Tracef("got: %v", got)
-		if got == size {
+		// XXX: alternative check is: got == size
+		// verify if server detects transmission complete correctly if
+		// currentData == b.mtu and the next read is 0 length
+		if len(currentData) < int(b.mtu) {
 			log.Infof("got everything")
 			log.Tracef("data:\n%s", string(data))
 			break

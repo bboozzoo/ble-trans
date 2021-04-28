@@ -203,12 +203,12 @@ func NewSnapdResponseTransmit() (*ble.Characteristic, *snapdResponseTransmit) {
 	c.HandleWrite(ble.WriteHandlerFunc(s.handleRewindTo))
 	// c.HandleNotify(ble.NotifyHandlerFunc(s.notifyNewOffset))
 	dSize := &ble.Descriptor{
-		UUID: ble.MustParse(ResponsePropSizeUUID),
+		UUID: ble.MustParse(ResponseSizePropUUID),
 	}
 	dSize.HandleRead(ble.ReadHandlerFunc(s.readCurrentSizeDescr))
 	c.AddDescriptor(dSize)
 	dChunk := &ble.Descriptor{
-		UUID: ble.MustParse(ResponsePropChunkStartUUID),
+		UUID: ble.MustParse(ResponseChunkStartPropUUID),
 	}
 	dChunk.HandleRead(ble.ReadHandlerFunc(s.readCurrentChunkDescr))
 	c.AddDescriptor(dChunk)
@@ -528,7 +528,7 @@ func (b *bleDeviceTransport) Advertise() error {
 	}()
 	return nil
 }
-func (b *bleDeviceTransport) Hide() {
+func (b *bleDeviceTransport) StopAdvertising() {
 	log.Tracef("stop advertising")
 	if b.advertiseCancel != nil {
 		b.advertiseCancel()

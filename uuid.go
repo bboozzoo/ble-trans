@@ -42,17 +42,33 @@ const (
 )
 
 var (
+	// UUID of the onboarding service implemented by the device
 	OnboardingServiceUUID = OnboardingUUID(serviceHandle)
 
-	OnboardingCharUUID      = OnboardingUUID(onboardingCharHandle)
+	// UUID of the onboarding characteristic
+	OnboardingCharUUID = OnboardingUUID(onboardingCharHandle)
+	// UUID of the onboarding state descriptor
 	OnboardingStatePropUUID = OnboardingUUID(stateDescrHandle)
+	// UUID of the onbiarding error descriptor
 	OnboardingErrorPropUUID = OnboardingUUID(errDescrHandle)
 
-	ResponseCharUUID           = OnboardingUUID(transmitCharHandle)
-	ResponsePropChunkStartUUID = OnboardingUUID(transmitChunkDescrHandle)
-	ResponsePropSizeUUID       = OnboardingUUID(transmitSizeDescrHandle)
+	// UUID of the response characteristic, this is where responses from the
+	// device can be obtained. Reading is done when the value read from the
+	// characteristic is smaller than the MTU, or the total size accumulated
+	// so far equals that held by the size descriptor.
+	ResponseCharUUID = OnboardingUUID(transmitCharHandle)
+	// UUID of the descriptor holding the offset of the currently read chunk
+	// of the response
+	ResponseChunkStartPropUUID = OnboardingUUID(transmitChunkDescrHandle)
+	// UUID of the descriptor holding the total size of the response
+	ResponseSizePropUUID = OnboardingUUID(transmitSizeDescrHandle)
 
-	RequestCharUUID     = OnboardingUUID(transmitRequestCharHandle)
+	// UUID of the request characteristic, this is where requests from the
+	// configurator are written to. The is considered done when the
+	// configurator writes a chunk of data smaller than the MTU.
+	RequestCharUUID = OnboardingUUID(transmitRequestCharHandle)
+	// UUID of the descriptor holding the total size of the data written so
+	// far
 	RequestSizePropUUID = OnboardingUUID(transmitRequestSizeDescrHandle)
 )
 

@@ -42,14 +42,20 @@ const (
 )
 
 var (
+	// XXX: make this an input to device and configurator
 	secret = []byte(strings.Repeat("a", 32))
 )
 
 type configuratorTransport interface {
 	Connect(addr string) error
 	Disconnect() error
+
 	Send(data []byte) error
 	Receive() ([]byte, error)
+
+	// WaitForState waits for device to get to desired state or the error
+	// state, in which case the error message will contain the last error
+	// reported by the device.
 	WaitForState(ctx context.Context, state State) error
 }
 
@@ -137,15 +143,21 @@ type waitFunc func(context.Context) error
 
 type deviceTransport interface {
 	Advertise() error
-	Hide()
+	StopAdvertising()
+
 	WaitConnected() (peer string, err error)
 	Disconnect(peer []byte)
 	Disconnected() <-chan string
+
 	NotifyState(state State) error
+	// prepare for client?
 	Send([]byte) (waitFunc, error)
+
 	PrepareReceive() error
 	Receive(ctx context.Context) ([]byte, error)
+
 	SetError(err error)
+
 	Reset()
 }
 
