@@ -36,6 +36,7 @@ const (
 	StateDevice
 	StateSessionSetup
 	StateReady
+	StateError
 
 	WaitTimeout = 30 * time.Second
 )
@@ -143,6 +144,7 @@ type deviceTransport interface {
 	Send([]byte) (waitFunc, error)
 	PrepareReceive() error
 	Receive(ctx context.Context) ([]byte, error)
+	SetError(err error)
 }
 
 type device struct {

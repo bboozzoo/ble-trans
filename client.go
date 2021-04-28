@@ -252,6 +252,7 @@ type bleConfiguratorTransport struct {
 
 	onboardingChar  *ble.Characteristic
 	stateDesc       *ble.Descriptor
+	errorDesc       *ble.Descriptor
 	currentState    State
 	stateLock       sync.Mutex
 	stateNotifyFunc func(State) (clear bool)
@@ -350,6 +351,10 @@ func (b *bleConfiguratorTransport) Connect(addr string) error {
 	if b.stateDesc == nil {
 		return fmt.Errorf("cannot find onboarding state descriptor")
 	}
+	b.errorDesc = p.FindDescriptor(ble.NewDescriptor(ble.MustParse(OnboardingErrorPropUUID)))
+	if b.errorDesc == nil {
+		return fmt.Errorf("cannot find onboarding error descriptor")
+	}
 	b.c.Subscribe(b.onboardingChar, false, ble.NotificationHandler(func(req []byte) {
 		b.stateLock.Lock()
 		defer b.stateLock.Unlock()
@@ -427,35 +432,52 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 	return data, nil
 }
 
+func (b *bleConfiguratorTransport) processErrorState() error {
+	// XXX: will this be truncated?
+	data, err := b.c.ReadDescriptor(b.errorDesc)
+	if err != nil {
+		return fmt.Errorf("cannot read error descriptor: %v", err)
+	}
+	return fmt.Errorf("device error: %v", string(data))
+}
+
 func (b *bleConfiguratorTransport) WaitForState(ctx context.Context, state State) error {
 	b.stateLock.Lock()
 
 	log.Tracef("wait for state %v (current %v)", state, b.currentState)
-	if b.currentState == state {
+	if current := b.currentState; current == state || current == StateError {
 		b.stateLock.Unlock()
+		if current == StateError {
+			return b.processErrorState()
+		}
 		return nil
 	}
 
-	inExpectedState := make(chan struct{}, 1)
+	stateChangedChan := make(chan State, 1)
 
 	b.stateNotifyFunc = func(newState State) (clear bool) {
-		if newState == state {
-			inExpectedState <- struct{}{}
+		if newState == state || newState == StateError {
+			stateChangedChan <- newState
 			return true
 		}
 		return false
 	}
 	b.stateLock.Unlock()
 
+	var reachedState State
 forLoop:
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-inExpectedState:
-			log.Tracef("reached state %v", state)
+		case reachedState = <-stateChangedChan:
+			log.Tracef("reached state %v", reachedState)
 			break forLoop
 		}
+	}
+
+	if reachedState == StateError {
+		return b.processErrorState()
 	}
 	return nil
 }

@@ -31,6 +31,7 @@ const (
 	serviceHandle        = "99df"
 	onboardingCharHandle = "99e0"
 	stateDescrHandle     = "99e1"
+	errDescrHandle       = "99e2"
 
 	transmitCharHandle       = "99d0"
 	transmitChunkDescrHandle = "99d1"
@@ -45,6 +46,7 @@ var (
 
 	OnboardingCharUUID      = OnboardingUUID(onboardingCharHandle)
 	OnboardingStatePropUUID = OnboardingUUID(stateDescrHandle)
+	OnboardingErrorPropUUID = OnboardingUUID(errDescrHandle)
 
 	ResponseCharUUID           = OnboardingUUID(transmitCharHandle)
 	ResponsePropChunkStartUUID = OnboardingUUID(transmitChunkDescrHandle)

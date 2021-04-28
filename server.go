@@ -81,11 +81,16 @@ func NewSnapdDeviceChar() (*ble.Characteristic, *snapdDeviceChar) {
 	c.HandleRead(ble.ReadHandlerFunc(s.read))
 	c.HandleWrite(ble.WriteHandlerFunc(s.written))
 	c.HandleNotify(ble.NotifyHandlerFunc(s.notifyProtocolState))
-	d := &ble.Descriptor{
+	dProto := &ble.Descriptor{
 		UUID: ble.MustParse(OnboardingStatePropUUID),
 	}
-	c.AddDescriptor(d)
-	d.HandleRead(ble.ReadHandlerFunc(s.readProtocolState))
+	c.AddDescriptor(dProto)
+	dProto.HandleRead(ble.ReadHandlerFunc(s.readProtocolState))
+	dErr := &ble.Descriptor{
+		UUID: ble.MustParse(OnboardingErrorPropUUID),
+	}
+	c.AddDescriptor(dErr)
+	dErr.HandleRead(ble.ReadHandlerFunc(s.readLastError))
 	return c, &s
 }
 
@@ -93,6 +98,7 @@ type snapdDeviceChar struct {
 	cnt         int
 	stateChange chan uint32
 	state       uint32
+	lastErr     error
 }
 
 func (s *snapdDeviceChar) setState(state State) {
@@ -100,13 +106,19 @@ func (s *snapdDeviceChar) setState(state State) {
 	s.stateChange <- uint32(state)
 }
 
-func (s *snapdDeviceChar) read(req ble.Request, rsp ble.ResponseWriter) {
+func (s *snapdDeviceChar) setError(err error) {
+	s.lastErr = err
+}
+
+func (s *snapdDeviceChar) reset() {
+	s.lastErr = nil
+	// this should be last
+	s.setState(StateWaitHello)
+}
+
+func readLongDesc(req ble.Request, rsp ble.ResponseWriter, content []byte) {
 	if req.Offset() == 0 {
-		s.cnt++
-	}
-	content := fmt.Sprintf("Communication for snapd onboarding read: %v", s.cnt)
-	if req.Offset() == 0 {
-		log.Tracef("starting sending of %q len(%v)", content, len(content))
+		log.Tracef("read long desc start, %x len(%v)", content, len(content))
 	}
 	log.Tracef("    offset %v cap %v", req.Offset(), rsp.Cap())
 
@@ -120,6 +132,17 @@ func (s *snapdDeviceChar) read(req ble.Request, rsp ble.ResponseWriter) {
 	if err != nil {
 		return
 	}
+}
+
+func (s *snapdDeviceChar) read(req ble.Request, rsp ble.ResponseWriter) {
+	if req.Offset() == 0 {
+		s.cnt++
+	}
+	content := fmt.Sprintf("Communication for snapd onboarding read: %v", s.cnt)
+	if req.Offset() == 0 {
+		log.Tracef("starting sending of %q len(%v)", content, len(content))
+	}
+	readLongDesc(req, rsp, []byte(content))
 }
 
 func (s *snapdDeviceChar) written(req ble.Request, rsp ble.ResponseWriter) {
@@ -147,6 +170,14 @@ func (s *snapdDeviceChar) readProtocolState(req ble.Request, rsp ble.ResponseWri
 	if err := binary.Write(rsp, binary.LittleEndian, s.state); err != nil {
 		log.Errorf("dev: cannot write current chunk size: %v", err)
 	}
+}
+
+func (s *snapdDeviceChar) readLastError(req ble.Request, rsp ble.ResponseWriter) {
+	content := ""
+	if s.lastErr != nil {
+		content = s.lastErr.Error()
+	}
+	readLongDesc(req, rsp, []byte(content))
 }
 
 type snapdResponseTransmit struct {
@@ -420,10 +451,17 @@ func runDevice(connectChan <-chan string) error {
 	if err != nil {
 		return err
 	}
-	if err := dev.WaitForConfiguration(); err != nil {
-		return fmt.Errorf("wait for configuration failed: %v", err)
+	for {
+		// XXX: wait for state reset?
+
+		if err := dev.WaitForConfiguration(); err != nil {
+			log.Errorf("wait for configuration failed: %v", err)
+			dt.SetError(err)
+		} else {
+			log.Tracef("configured, looping...")
+			break
+		}
 	}
-	log.Tracef("configured, looping...")
 	select {}
 }
 
@@ -537,4 +575,9 @@ func (b *bleDeviceTransport) Receive(ctx context.Context) ([]byte, error) {
 		b.req.reset()
 		return data, nil
 	}
+}
+
+func (b *bleDeviceTransport) SetError(err error) {
+	b.dev.setError(err)
+	b.dev.setState(StateError)
 }
