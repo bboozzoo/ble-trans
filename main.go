@@ -10,23 +10,34 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type ConnectEvent struct {
+	Peer   string
+	Handle uint16
+}
+
+type DisconnectEvent struct {
+	Handle uint16
+}
+
 func main() {
 	log.SetLevel(log.TraceLevel)
 	log.SetFormatter(&log.TextFormatter{
 		FullTimestamp: true,
 	})
 
-	connectionChan := make(chan string, 10)
+	connectChan := make(chan ConnectEvent, 10)
+	disconnectChan := make(chan DisconnectEvent, 10)
 
 	dev, err := ble_linux.NewDeviceWithName("snapd",
 		ble.OptConnectHandler(func(e evt.LEConnectionComplete) {
 			log.Infof("connect handler, peer: %x handle: %v", e.PeerAddress(), e.ConnectionHandle())
 			a := e.PeerAddress()
 			addr := fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", a[0], a[1], a[2], a[3], a[4], a[5])
-			connectionChan <- addr
+			connectChan <- ConnectEvent{Peer: addr, Handle: e.ConnectionHandle()}
 		}),
 		ble.OptDisconnectHandler(func(e evt.DisconnectionComplete) {
 			log.Infof("disconnected, handle: %v", e.ConnectionHandle())
+			disconnectChan <- DisconnectEvent{Handle: e.ConnectionHandle()}
 		}),
 	)
 	if err != nil {
@@ -53,7 +64,7 @@ func main() {
 		}
 		err = client(os.Args[2])
 	case "device":
-		err = runDevice(connectionChan)
+		err = runDevice(connectChan, disconnectChan)
 	case "configurator":
 		if len(os.Args) < 3 {
 			fmt.Fprintf(os.Stderr, "missing client address\n")

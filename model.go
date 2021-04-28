@@ -140,11 +140,13 @@ type deviceTransport interface {
 	Hide()
 	WaitConnected() (peer string, err error)
 	Disconnect(peer []byte)
+	Disconnected() <-chan string
 	NotifyState(state State) error
 	Send([]byte) (waitFunc, error)
 	PrepareReceive() error
 	Receive(ctx context.Context) ([]byte, error)
 	SetError(err error)
+	Reset()
 }
 
 type device struct {
@@ -174,6 +176,7 @@ func (d *device) WaitForConfiguration() error {
 	// advertise the service
 	d.t.Advertise()
 
+	// XXX: move this outside?
 	peer, err := d.t.WaitConnected()
 	if err != nil {
 		return fmt.Errorf("cannot wait for connection: %v", err)

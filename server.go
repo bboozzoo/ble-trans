@@ -249,10 +249,20 @@ func (s *snapdResponseTransmit) advanceChunk(size uint32) (start uint32, complet
 }
 
 func (s *snapdResponseTransmit) rewindTo(start uint32) {
+	// s.lock.Lock()
+	// defer s.lock.Unlock()
 	// XXX range check
 	log.Tracef("rsp: rewind to: %v", start)
 	s.currentChunkStart = start
 	// s.chunkStartChange <- start
+}
+
+func (s *snapdResponseTransmit) reset() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.currentChunkStart = 0
+	s.currentSize = 0
+	s.data = nil
 }
 
 func (s *snapdResponseTransmit) readNextChunk(req ble.Request, rsp ble.ResponseWriter) {
@@ -445,24 +455,27 @@ func (s *snapdRequestTransmit) waitForReady(f func([]byte)) {
 	}
 }
 
-func runDevice(connectChan <-chan string) error {
-	dt := newInitializedDeviceTransport(connectChan)
+func runDevice(connectChan <-chan ConnectEvent, disconnectChan <-chan DisconnectEvent) error {
+	dt := newInitializedDeviceTransport(connectChan, disconnectChan)
 	dev, err := NewDevice(dt)
 	if err != nil {
 		return err
 	}
 	for {
+		// XXX: wait for connection
 		// XXX: wait for state reset?
 
 		if err := dev.WaitForConfiguration(); err != nil {
 			log.Errorf("wait for configuration failed: %v", err)
 			dt.SetError(err)
 		} else {
-			log.Tracef("configured, looping...")
-			break
+			log.Tracef("configured")
 		}
+		log.Tracef("waiting for peer to disconnect")
+		peer := <-dt.Disconnected()
+		log.Tracef("peer %v disconnected", peer)
+		dt.Reset()
 	}
-	select {}
 }
 
 type bleDeviceTransport struct {
@@ -470,13 +483,15 @@ type bleDeviceTransport struct {
 	req *snapdRequestTransmit  // configurator -> dev
 	dev *snapdDeviceChar
 
-	incomingConnection <-chan string
+	incomingConnection <-chan ConnectEvent
+	disconnected       <-chan DisconnectEvent
+	connections        map[uint16]string
 
 	advertiseCancel context.CancelFunc
 	advertiseResult chan error
 }
 
-func newInitializedDeviceTransport(connectChan <-chan string) deviceTransport {
+func newInitializedDeviceTransport(connectChan <-chan ConnectEvent, disconnectChan <-chan DisconnectEvent) deviceTransport {
 	onboardingSvc := ble.NewService(ble.MustParse(OnboardingServiceUUID))
 	responseChar, response := NewSnapdResponseTransmit()
 	onboardingSvc.AddCharacteristic(responseChar)
@@ -493,6 +508,8 @@ func newInitializedDeviceTransport(connectChan <-chan string) deviceTransport {
 		req:                request,
 		dev:                dev,
 		incomingConnection: connectChan,
+		disconnected:       disconnectChan,
+		connections:        make(map[uint16]string),
 		advertiseResult:    make(chan error),
 	}
 }
@@ -524,13 +541,32 @@ func (b *bleDeviceTransport) Hide() {
 
 func (b *bleDeviceTransport) WaitConnected() (string, error) {
 	log.Tracef("wait for connection")
-	peer := <-b.incomingConnection
-	log.Tracef("got connection from %s", peer)
-	return peer, nil
+	evt := <-b.incomingConnection
+	log.Tracef("got connection from %s", evt.Peer)
+
+	// keep track of connections
+	b.connections[evt.Handle] = evt.Peer
+	return evt.Peer, nil
 }
 
 func (b *bleDeviceTransport) Disconnect(peer []byte) {
 	// XXX
+}
+
+func (b *bleDeviceTransport) Disconnected() <-chan string {
+	c := make(chan string, 1)
+	go func() {
+		evt := <-b.disconnected
+		peer := b.connections[evt.Handle]
+		if peer == "" {
+			log.Tracef("no connection with handle %v?", evt.Handle)
+		} else {
+			delete(b.connections, evt.Handle)
+		}
+		log.Tracef("peer %q (%v) disconnected", peer, evt.Handle)
+		c <- peer
+	}()
+	return c
 }
 
 func (b *bleDeviceTransport) NotifyState(state State) error {
@@ -580,4 +616,11 @@ func (b *bleDeviceTransport) Receive(ctx context.Context) ([]byte, error) {
 func (b *bleDeviceTransport) SetError(err error) {
 	b.dev.setError(err)
 	b.dev.setState(StateError)
+}
+
+func (b *bleDeviceTransport) Reset() {
+	log.Warnf("resetting device transport")
+	b.req.reset()
+	b.rsp.reset()
+	b.dev.reset()
 }
