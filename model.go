@@ -180,6 +180,8 @@ func (d *device) WaitForConfiguration() error {
 	}
 	fmt.Printf("connection from peer: %s\n", peer)
 
+	// XXX: observing an error from go-ble:
+	// 2021/04/28 07:51:37 skt: can't find the cmd for CommandCompleteEP: 01 0A 20 0C
 	// stop announcing
 	// d.t.Hide()
 
