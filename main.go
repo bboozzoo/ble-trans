@@ -23,6 +23,7 @@ type DisconnectEvent struct {
 
 type Options struct {
 	Debug      bool `long:"debug" description:"Show debug log"`
+	MTU        int  `long:"mtu" description:"MTU for the client" default:"512"`
 	Positional struct {
 		Mode     string `description:"Mode (client|server|device|configurator)"`
 		ModeArgs []string
@@ -95,7 +96,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "missing client address and/or scenario (try '1', '2')\n")
 			os.Exit(1)
 		}
-		err = runConfigurator(args[0], args[1])
+		err = runConfigurator(args[0], args[1], opts.MTU)
 	default:
 		err = fmt.Errorf("unknown action %q", mode)
 	}

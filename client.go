@@ -226,8 +226,9 @@ func sendData(cln ble.Client, mtu int, data []byte) (bytesSent, bytesRead uint, 
 	return bytesSent, bytesRead, nil
 }
 
-func runConfigurator(addr string, scenario string) error {
+func runConfigurator(addr string, scenario string, MTU int) error {
 	ct := newConfiguratorTransport()
+	ct.mtu = uint(MTU)
 	cfg, err := NewConfiguratorFor(addr, ct)
 	if err != nil {
 		return err
@@ -315,13 +316,20 @@ func (b *bleConfiguratorTransport) Connect(addr string) error {
 		return fmt.Errorf("cannot discover profiles: %v", err)
 	}
 
-	log.Tracef("changing MTU to %v", MTU)
-	txMtu, err := b.c.ExchangeMTU(MTU)
+	if b.mtu == 0 {
+		b.mtu = uint(MTU)
+	}
+	log.Tracef("changing MTU to %v", b.mtu)
+	txMtu, err := b.c.ExchangeMTU(int(b.mtu))
 	if err != nil {
 		return fmt.Errorf("cannot change MTU: %v", err)
 	}
+	if txMtu > 512 {
+		// XXX: we're getting 515 (ble.MaxMTU = 512 + 3)
+		txMtu = 512
+	}
 	log.Infof("MTU: %v\n", txMtu)
-	b.mtu = uint(MTU)
+	b.mtu = uint(txMtu)
 
 	onboardingService := ble.NewService(ble.MustParse(OnboardingServiceUUID))
 	srv := p.FindService(onboardingService)
