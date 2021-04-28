@@ -134,7 +134,7 @@ func client(hwaddr string) (err error) {
 		got += uint32(len(currentData))
 		log.Tracef("got: %v", got)
 		if got == size {
-			log.Infof("got everything")
+			log.Tracef("got everything")
 			log.Tracef("data:\n%s", string(data))
 			break
 		}
@@ -421,7 +421,7 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read response size: %v", err)
 	}
-	log.Infof("response size: %v", size)
+	log.Tracef("response size: %v", size)
 	// uint32
 	b.bytesReceived += 4
 
@@ -463,7 +463,7 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 		// currentData == b.mtu and the next read is 0 length
 		// if len(currentData) < int(b.mtu) {
 		if got == size {
-			log.Infof("got everything")
+			log.Tracef("got everything")
 			log.Tracef("data:\n%s", string(data))
 			break
 		}

@@ -20,13 +20,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/mvo5/ble-trans/netonboard"
+	log "github.com/sirupsen/logrus"
 )
 
 type State int
@@ -102,6 +105,7 @@ func (c *configurator) Configure(scenario string) error {
 		return fmt.Errorf("cannot generate hello message: %v", err)
 	}
 
+	log.Debugf("-> dev: %s", string(hello))
 	if err := c.t.Send(hello); err != nil {
 		return fmt.Errorf("cannot send hello message: %v", err)
 	}
@@ -117,6 +121,7 @@ func (c *configurator) Configure(scenario string) error {
 		return fmt.Errorf("cannot receive 'device' message: %v", err)
 	}
 
+	log.Debugf("<- dev: %s", string(deviceMsg))
 	if err := c.cfg.RcvDevice(deviceMsg); err != nil {
 		return fmt.Errorf("cannot process 'device' message: %v", err)
 	}
@@ -125,6 +130,8 @@ func (c *configurator) Configure(scenario string) error {
 	if err != nil {
 		return fmt.Errorf("cannot generate session-setup message: %v", err)
 	}
+
+	log.Debugf("-> dev: %s", string(setup))
 	if err := c.t.Send(setup); err != nil {
 		return fmt.Errorf("cannot send session setup message: %v", err)
 	}
@@ -168,25 +175,51 @@ func (c *configurator) Configure(scenario string) error {
 	// return nil
 }
 
+func extractFirstNetwork(maybeWifisList interface{}) (map[string]interface{}, error) {
+	networksList := maybeWifisList.([]interface{})
+	if len(networksList) == 0 {
+		return nil, fmt.Errorf("networks list is empty")
+	}
+	wifiNet := networksList[0].(map[string]interface{})
+	return map[string]interface{}{
+		"ssid":  wifiNet["ssid"],
+		"bssid": wifiNet["bssid"],
+		"psk":   "secret password",
+	}, nil
+}
+
+func prettyJson(what interface{}) string {
+	var buf bytes.Buffer
+	e := json.NewEncoder(&buf)
+	e.SetIndent("", "  ")
+	e.Encode(what)
+	return buf.String()
+}
+
 func (c *configurator) scenario1() error {
 	deviceReady, err := c.t.Receive()
 	if err != nil {
 		return fmt.Errorf("cannot receive 'ready' message: %v", err)
 	}
 
+	log.Debugf("<- dev: %s", string(deviceReady))
 	d, err := c.cfg.RcvReady(deviceReady)
 	if err != nil {
 		return fmt.Errorf("cannot process 'ready' message: %v", err)
 	}
+	log.Infof("secure transport established")
 
-	fmt.Printf("got data:\n%v\n", d)
+	log.Infof("device data:\n%s", prettyJson(d))
 
-	cfgMsg, err := c.cfg.Cfg(map[string]interface{}{
+	cfgData := map[string]interface{}{
 		"wifi.list-ssids": true,
-	})
+	}
+	log.Infof("send cfg:\n%s", prettyJson(cfgData))
+	cfgMsg, err := c.cfg.Cfg(cfgData)
 	if err != nil {
 		return fmt.Errorf("cannot generate 'cfg' message: %v", err)
 	}
+	log.Debugf("-> dev: %s", string(cfgMsg))
 	if err := c.t.Send(cfgMsg); err != nil {
 		return fmt.Errorf("cannot send 'cfg' message: %v", err)
 	}
@@ -203,15 +236,16 @@ func (c *configurator) scenario1() error {
 		return fmt.Errorf("cannot receive 'reply' message: %v", err)
 	}
 
+	log.Debugf("<- dev: %s", string(replyMsg))
 	reply, err := c.cfg.RcvReply(replyMsg)
 	if err != nil {
 		return fmt.Errorf("cannot process 'reply' message: %v", err)
 	}
-	fmt.Printf("got reply:\n%v\n", reply)
+	log.Infof("device reply:\n%s", prettyJson(reply))
 
-	ssidsList := reply["wifi.ssids"].([]interface{})
-	if len(ssidsList) == 0 {
-		return fmt.Errorf("ssids list is empty")
+	wifiNet, err := extractFirstNetwork(reply["wifi.ssids"])
+	if err != nil {
+		return fmt.Errorf("cannot extract wifi network")
 	}
 
 	ctx, cancel = context.WithTimeout(context.Background(), WaitTimeout)
@@ -221,13 +255,16 @@ func (c *configurator) scenario1() error {
 		return fmt.Errorf("wait for state change failed: %v", err)
 	}
 
-	cfgMsg, err = c.cfg.Cfg(map[string]interface{}{
+	cfgData = map[string]interface{}{
 		"core.onboard":   struct{}{},
-		"wifi.configure": ssidsList[0],
-	})
+		"wifi.configure": wifiNet,
+	}
+	log.Infof("send cfg:\n%s", prettyJson(cfgData))
+	cfgMsg, err = c.cfg.Cfg(cfgData)
 	if err != nil {
 		return fmt.Errorf("cannot generate 'cfg' message: %v", err)
 	}
+	log.Debugf("-> dev: %s", string(cfgMsg))
 	if err := c.t.Send(cfgMsg); err != nil {
 		return fmt.Errorf("cannot send 'cfg' message: %v", err)
 	}
@@ -248,24 +285,30 @@ func (c *configurator) scenario2() error {
 		return fmt.Errorf("cannot receive 'ready' message: %v", err)
 	}
 
+	log.Debugf("<- dev: %s", string(deviceReady))
 	d, err := c.cfg.RcvReady(deviceReady)
 	if err != nil {
 		return fmt.Errorf("cannot process 'ready' message: %v", err)
 	}
+	log.Infof("secure transport established")
 
-	fmt.Printf("got data:\n%v\n", d)
-	ssidsList := d["wifi.ssids"].([]interface{})
-	if len(ssidsList) == 0 {
-		return fmt.Errorf("ssids list is empty")
+	log.Infof("device data:\n%s", prettyJson(d))
+	wifiNet, err := extractFirstNetwork(d["wifi.ssids"])
+	if err != nil {
+		return fmt.Errorf("cannot extract wifi network")
 	}
 
-	cfgMsg, err := c.cfg.Cfg(map[string]interface{}{
+	cfgData := map[string]interface{}{
 		"core.onboard":   struct{}{},
-		"wifi.configure": ssidsList[0],
-	})
+		"wifi.configure": wifiNet,
+	}
+	log.Infof("send cfg:\n%s", prettyJson(cfgData))
+
+	cfgMsg, err := c.cfg.Cfg(cfgData)
 	if err != nil {
 		return fmt.Errorf("cannot generate 'cfg' message: %v", err)
 	}
+	log.Debugf("-> dev: %s", string(cfgMsg))
 	if err := c.t.Send(cfgMsg); err != nil {
 		return fmt.Errorf("cannot send 'cfg' message: %v", err)
 	}
