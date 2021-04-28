@@ -8,6 +8,7 @@ import (
 	"github.com/go-ble/ble"
 	ble_linux "github.com/go-ble/ble/linux"
 	"github.com/go-ble/ble/linux/hci/evt"
+	"github.com/jessevdk/go-flags"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -20,11 +21,27 @@ type DisconnectEvent struct {
 	Handle uint16
 }
 
+type Options struct {
+	Debug      bool `long:"debug" description:"Show debug log"`
+	Positional struct {
+		Mode     string `description:"Mode (client|server|device|configurator)"`
+		ModeArgs []string
+	} `positional-args:"yes"`
+}
+
 func main() {
-	log.SetLevel(log.TraceLevel)
+	var opts Options
+	_, err := flags.Parse(&opts)
+	if err != nil {
+		os.Exit(1)
+	}
 	log.SetFormatter(&log.TextFormatter{
 		FullTimestamp: true,
 	})
+	if opts.Debug {
+		log.SetLevel(log.TraceLevel)
+		log.Debugf("debug logging enabled")
+	}
 
 	connectChan := make(chan ConnectEvent, 10)
 	disconnectChan := make(chan DisconnectEvent, 10)
@@ -48,40 +65,39 @@ func main() {
 	ble.SetDefaultDevice(dev)
 
 	// XXX: use proper cmdline parser
-	what := "server"
 	iface := "hci0"
 
-	if len(os.Args) > 1 {
-		what = os.Args[1]
-	}
+	mode := opts.Positional.Mode
+	args := opts.Positional.ModeArgs
+	log.Infof("mode: %v %v", mode, args)
 
-	switch what {
+	switch mode {
 	case "server":
 		err = runServer(iface)
 	case "client":
-		if len(os.Args) < 3 {
+		if len(args) == 0 {
 			fmt.Fprintf(os.Stderr, "missing client address\n")
 			os.Exit(1)
 		}
-		err = client(os.Args[2])
+		err = client(args[0])
 	case "device":
-		if len(os.Args) < 3 {
+		if len(args) == 0 {
 			fmt.Fprintf(os.Stderr, "missing scenario, try '1', '2'\n")
 			os.Exit(1)
 		}
 		if err = loadSssids(); err != nil {
 			fmt.Fprintf(os.Stderr, "cannot load ssids list: %v", err)
 		} else {
-			err = runDevice(connectChan, disconnectChan, os.Args[2])
+			err = runDevice(connectChan, disconnectChan, args[0])
 		}
 	case "configurator":
-		if len(os.Args) < 4 {
+		if len(args) != 2 {
 			fmt.Fprintf(os.Stderr, "missing client address and/or scenario (try '1', '2')\n")
 			os.Exit(1)
 		}
-		err = runConfigurator(os.Args[2], os.Args[3])
+		err = runConfigurator(args[0], args[1])
 	default:
-		err = fmt.Errorf("unknown action %q", what)
+		err = fmt.Errorf("unknown action %q", mode)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)

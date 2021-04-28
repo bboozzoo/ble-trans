@@ -306,9 +306,10 @@ func (b *bleConfiguratorTransport) Connect(addr string) error {
 	if err != nil {
 		return fmt.Errorf("cannot connect to %s: %v", addr, err)
 	}
+	log.Infof("connected to device %v", cln.Addr())
 	b.c = cln
 
-	log.Infof("discovering profiles")
+	log.Debugf("discovering profiles")
 	p, err := b.c.DiscoverProfile(true)
 	if err != nil {
 		return fmt.Errorf("cannot discover profiles: %v", err)
@@ -325,8 +326,7 @@ func (b *bleConfiguratorTransport) Connect(addr string) error {
 	onboardingService := ble.NewService(ble.MustParse(OnboardingServiceUUID))
 	srv := p.FindService(onboardingService)
 	if srv == nil {
-		log.Warnf("service not found")
-		return nil
+		return fmt.Errorf("onboarding service not found")
 	}
 
 	b.onboardingService = srv

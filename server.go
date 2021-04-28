@@ -503,15 +503,15 @@ func runDevice(connectChan <-chan ConnectEvent, disconnectChan <-chan Disconnect
 			log.Errorf("wait for configuration failed: %v", err)
 			dt.SetError(err)
 		} else {
-			log.Tracef("configured")
+			log.Infof("configured")
 			stats := dt.Stats()
 			log.Infof("bytes sent:         %v", stats.BytesSent)
 			log.Infof("bytes received:     %v", stats.BytesReceived)
 			log.Infof("notifications sent: %v", stats.Notifications)
 		}
-		log.Tracef("waiting for peer to disconnect")
+		log.Infof("waiting for peer to disconnect")
 		peer := <-dt.Disconnected()
-		log.Tracef("peer %v disconnected", peer)
+		log.Infof("peer %v disconnected", peer)
 		dt.Reset()
 	}
 }
