@@ -99,6 +99,10 @@ type snapdDeviceChar struct {
 	stateChange chan uint32
 	state       uint32
 	lastErr     error
+
+	bytesReceived     uint
+	bytesSent         uint
+	notificationsSent uint
 }
 
 func (s *snapdDeviceChar) setState(state State) {
@@ -116,7 +120,7 @@ func (s *snapdDeviceChar) reset() {
 	s.setState(StateWaitHello)
 }
 
-func readLongDesc(req ble.Request, rsp ble.ResponseWriter, content []byte) {
+func readLongDesc(req ble.Request, rsp ble.ResponseWriter, content []byte) (uint, error) {
 	if req.Offset() == 0 {
 		log.Tracef("read long desc start, %x len(%v)", content, len(content))
 	}
@@ -130,8 +134,9 @@ func readLongDesc(req ble.Request, rsp ble.ResponseWriter, content []byte) {
 	n, err := rsp.Write([]byte(content[start : start+toSend]))
 	log.Tracef("sent, %v bytes, err: %v", n, err)
 	if err != nil {
-		return
+		return 0, err
 	}
+	return uint(n), nil
 }
 
 func (s *snapdDeviceChar) read(req ble.Request, rsp ble.ResponseWriter) {
@@ -142,7 +147,11 @@ func (s *snapdDeviceChar) read(req ble.Request, rsp ble.ResponseWriter) {
 	if req.Offset() == 0 {
 		log.Tracef("starting sending of %q len(%v)", content, len(content))
 	}
-	readLongDesc(req, rsp, []byte(content))
+	n, err := readLongDesc(req, rsp, []byte(content))
+	if err != nil {
+		return
+	}
+	s.bytesSent += n
 }
 
 func (s *snapdDeviceChar) written(req ble.Request, rsp ble.ResponseWriter) {
@@ -158,10 +167,12 @@ func (s *snapdDeviceChar) notifyProtocolState(req ble.Request, n ble.Notifier) {
 	for {
 		select {
 		case state := <-s.stateChange:
+			s.notificationsSent++
 			log.Tracef("dev: notify state change to %v", state)
 			if err := binary.Write(n, binary.LittleEndian, state); err != nil {
 				log.Errorf("dev: cannot write current chunk size: %v", err)
 			}
+			s.bytesSent += 4
 		}
 	}
 }
@@ -170,6 +181,7 @@ func (s *snapdDeviceChar) readProtocolState(req ble.Request, rsp ble.ResponseWri
 	if err := binary.Write(rsp, binary.LittleEndian, s.state); err != nil {
 		log.Errorf("dev: cannot write current chunk size: %v", err)
 	}
+	s.bytesSent += 4
 }
 
 func (s *snapdDeviceChar) readLastError(req ble.Request, rsp ble.ResponseWriter) {
@@ -177,7 +189,11 @@ func (s *snapdDeviceChar) readLastError(req ble.Request, rsp ble.ResponseWriter)
 	if s.lastErr != nil {
 		content = s.lastErr.Error()
 	}
-	readLongDesc(req, rsp, []byte(content))
+	n, err := readLongDesc(req, rsp, []byte(content))
+	if err != nil {
+		return
+	}
+	s.bytesSent += n
 }
 
 type snapdResponseTransmit struct {
@@ -190,6 +206,10 @@ type snapdResponseTransmit struct {
 	dataSentFunc      func()
 
 	lock sync.Mutex
+
+	bytesReceived     uint
+	bytesSent         uint
+	notificationsSent uint
 }
 
 func NewSnapdResponseTransmit() (*ble.Characteristic, *snapdResponseTransmit) {
@@ -298,6 +318,7 @@ func (s *snapdResponseTransmit) readNextChunk(req ble.Request, rsp ble.ResponseW
 		log.Errorf("rsp: writing failed: %v", err)
 		return
 	}
+	s.bytesSent += uint(n)
 	if req.Offset()+n == len(chunk) {
 		log.Tracef("chunk done")
 		// whole chunk was read, advance
@@ -321,6 +342,7 @@ func (s *snapdResponseTransmit) readCurrentChunkDescr(req ble.Request, rsp ble.R
 	if err := binary.Write(rsp, binary.LittleEndian, s.currentChunkStart); err != nil {
 		log.Errorf("rsp: cannot write current chunk offset: %v", err)
 	}
+	s.bytesSent += 4
 }
 
 func (s *snapdResponseTransmit) readCurrentSizeDescr(req ble.Request, rsp ble.ResponseWriter) {
@@ -329,6 +351,7 @@ func (s *snapdResponseTransmit) readCurrentSizeDescr(req ble.Request, rsp ble.Re
 	if err := binary.Write(rsp, binary.LittleEndian, s.currentSize); err != nil {
 		log.Errorf("rsp: cannot write current chunk size: %v", err)
 	}
+	s.bytesSent += 4
 }
 
 func (s *snapdResponseTransmit) handleRewindTo(req ble.Request, rsp ble.ResponseWriter) {
@@ -340,6 +363,7 @@ func (s *snapdResponseTransmit) handleRewindTo(req ble.Request, rsp ble.Response
 		log.Errorf("rsp: cannot read rewind-to offset: %v", err)
 	}
 	s.rewindTo(offset)
+	s.bytesReceived += 4
 }
 
 func (s *snapdResponseTransmit) notifyNewOffset(req ble.Request, n ble.Notifier) {
@@ -347,6 +371,7 @@ func (s *snapdResponseTransmit) notifyNewOffset(req ble.Request, n ble.Notifier)
 	for {
 		select {
 		case newStart, ok := <-s.chunkStartChange:
+			s.notificationsSent++
 			log.Tracef("rsp: notify new offset: %v (ok %v)", newStart, ok)
 			if !ok {
 				log.Tracef("chunk start change closed")
@@ -355,6 +380,7 @@ func (s *snapdResponseTransmit) notifyNewOffset(req ble.Request, n ble.Notifier)
 			if err := binary.Write(n, binary.LittleEndian, newStart); err != nil {
 				log.Errorf("rsp: cannot notify about new chunk offset: %v", err)
 			}
+			s.bytesSent += 4
 		}
 	}
 }
@@ -369,6 +395,10 @@ type snapdRequestTransmit struct {
 	lock sync.Mutex
 
 	readyFunc func([]byte)
+
+	bytesReceived     uint
+	bytesSent         uint
+	notificationsSent uint
 }
 
 func NewSnapdRequestTransmit() (*ble.Characteristic, *snapdRequestTransmit) {
@@ -403,12 +433,14 @@ func (s *snapdRequestTransmit) handleDataWrite(req ble.Request, rsp ble.Response
 	log.Tracef("req: got %v bytes", len(data))
 	s.data = append(s.data, data...)
 	s.currentSize += uint32(len(data))
+	s.bytesReceived += uint(len(data))
 }
 
 func (s *snapdRequestTransmit) notifySize(req ble.Request, n ble.Notifier) {
 	for {
 		select {
 		case newStart, ok := <-s.currentSizeChange:
+			s.notificationsSent++
 			if !ok {
 				return
 			}
@@ -416,6 +448,7 @@ func (s *snapdRequestTransmit) notifySize(req ble.Request, n ble.Notifier) {
 			if err := binary.Write(n, binary.LittleEndian, newStart); err != nil {
 				log.Errorf("req: cannot notify about new chunk offset: %v", err)
 			}
+			s.bytesSent += 4
 		}
 	}
 }
@@ -426,6 +459,7 @@ func (s *snapdRequestTransmit) readCurrentSizeDescr(req ble.Request, rsp ble.Res
 	if err := binary.Write(rsp, binary.LittleEndian, s.currentSize); err != nil {
 		log.Errorf("req: cannot write current chunk size: %v", err)
 	}
+	s.bytesSent += 4
 }
 
 func (s *snapdRequestTransmit) reset() {
@@ -470,6 +504,10 @@ func runDevice(connectChan <-chan ConnectEvent, disconnectChan <-chan Disconnect
 			dt.SetError(err)
 		} else {
 			log.Tracef("configured")
+			stats := dt.Stats()
+			log.Infof("bytes sent:         %v", stats.BytesSent)
+			log.Infof("bytes received:     %v", stats.BytesReceived)
+			log.Infof("notifications sent: %v", stats.Notifications)
 		}
 		log.Tracef("waiting for peer to disconnect")
 		peer := <-dt.Disconnected()
@@ -489,6 +527,10 @@ type bleDeviceTransport struct {
 
 	advertiseCancel context.CancelFunc
 	advertiseResult chan error
+
+	bytesSent             uint
+	bytesReceived         uint
+	notificationsReceived uint
 }
 
 func newInitializedDeviceTransport(connectChan <-chan ConnectEvent, disconnectChan <-chan DisconnectEvent) deviceTransport {
@@ -623,4 +665,12 @@ func (b *bleDeviceTransport) Reset() {
 	b.req.reset()
 	b.rsp.reset()
 	b.dev.reset()
+}
+
+func (b *bleDeviceTransport) Stats() Stats {
+	return Stats{
+		BytesSent:     b.rsp.bytesSent + b.req.bytesSent + b.dev.bytesSent,
+		BytesReceived: b.rsp.bytesReceived + b.req.bytesReceived + b.dev.bytesReceived,
+		Notifications: b.rsp.notificationsSent + b.req.notificationsSent + b.dev.notificationsSent,
+	}
 }

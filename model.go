@@ -48,6 +48,12 @@ var (
 	wifiSsids interface{}
 )
 
+type Stats struct {
+	BytesSent     uint
+	BytesReceived uint
+	Notifications uint
+}
+
 type configuratorTransport interface {
 	Connect(addr string) error
 	Disconnect() error
@@ -59,6 +65,8 @@ type configuratorTransport interface {
 	// state, in which case the error message will contain the last error
 	// reported by the device.
 	WaitForState(ctx context.Context, state State) error
+
+	Stats() Stats
 }
 
 type configurator struct {
@@ -292,6 +300,8 @@ type deviceTransport interface {
 	SetError(err error)
 
 	Reset()
+
+	Stats() Stats
 }
 
 type device struct {

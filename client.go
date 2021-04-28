@@ -144,7 +144,7 @@ func client(hwaddr string) (err error) {
 	if err != nil {
 		return fmt.Errorf("cannot read file: %v", err)
 	}
-	if err := sendData(cln, 200, toSendData); err != nil {
+	if _, _, err := sendData(cln, 200, toSendData); err != nil {
 		return fmt.Errorf("cannot send data: %v", err)
 	}
 
@@ -190,7 +190,7 @@ func asUint32Size(val uint32) []byte {
 	return buf.Bytes()
 }
 
-func sendData(cln ble.Client, mtu int, data []byte) error {
+func sendData(cln ble.Client, mtu int, data []byte) (bytesSent, bytesRead uint, err error) {
 	p := cln.Profile()
 	char := p.FindCharacteristic(ble.NewCharacteristic(ble.MustParse(RequestCharUUID)))
 	desc := p.FindDescriptor(ble.NewDescriptor(ble.MustParse(RequestSizePropUUID)))
@@ -206,20 +206,24 @@ func sendData(cln ble.Client, mtu int, data []byte) error {
 		log.Tracef("sending %v bytes, offset %v/%v", len(chunk), start, len(data))
 		if err := cln.WriteCharacteristic(char, chunk, false); err != nil {
 			log.Errorf("cannot send: %v", err)
-			return err
+			return 0, 0, err
 		}
 		start += len(chunk)
+		bytesSent += uint(len(chunk))
+
 		size, err := readUint32FromDescriptor(cln, desc)
 		if err != nil {
-			return fmt.Errorf("cannot read size: %v", err)
+			return 0, 0, fmt.Errorf("cannot read size: %v", err)
 		}
+		bytesRead += 4
+
 		log.Tracef("size at client: %v", size)
 		if start == len(data) && len(chunk) == 0 {
 			log.Tracef("all done")
 			break
 		}
 	}
-	return nil
+	return bytesSent, bytesRead, nil
 }
 
 func runConfigurator(addr string, scenario string) error {
@@ -228,10 +232,17 @@ func runConfigurator(addr string, scenario string) error {
 	if err != nil {
 		return err
 	}
+	start := time.Now()
 	if err := cfg.Configure(scenario); err != nil {
 		return fmt.Errorf("cannot configure: %v", err)
 	}
+	end := time.Now()
 	log.Infof("device configured")
+	stats := ct.Stats()
+	log.Infof("bytes sent:             %v", stats.BytesSent)
+	log.Infof("bytes received:         %v", stats.BytesReceived)
+	log.Infof("notifications received: %v", stats.Notifications)
+	log.Infof("time: %v", end.Sub(start))
 	return nil
 }
 
@@ -256,6 +267,10 @@ type bleConfiguratorTransport struct {
 	currentState    State
 	stateLock       sync.Mutex
 	stateNotifyFunc func(State) (clear bool)
+
+	bytesSent             uint
+	bytesReceived         uint
+	notificationsReceived uint
 }
 
 func newConfiguratorTransport() *bleConfiguratorTransport {
@@ -359,12 +374,16 @@ func (b *bleConfiguratorTransport) Connect(addr string) error {
 		b.stateLock.Lock()
 		defer b.stateLock.Unlock()
 
+		b.notificationsReceived++
+
 		log.Tracef("got state notify: %x", req)
 		newState, err := readUint32FromRawBytes(req)
 		if err != nil {
 			log.Errorf("cannot unpack new offset: %v", err)
 			return
 		}
+		b.bytesReceived += 4
+
 		log.Tracef("state change: %v -> %v", b.currentState, newState)
 		b.currentState = State(newState)
 		if b.stateNotifyFunc != nil && b.stateNotifyFunc(b.currentState) {
@@ -388,7 +407,13 @@ func (b *bleConfiguratorTransport) Disconnect() error {
 }
 
 func (b *bleConfiguratorTransport) Send(data []byte) error {
-	return sendData(b.c, int(b.mtu), data)
+	wr, rd, err := sendData(b.c, int(b.mtu), data)
+	if err != nil {
+		return err
+	}
+	b.bytesSent += wr
+	b.bytesReceived += rd
+	return nil
 }
 
 func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
@@ -397,11 +422,16 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 		return nil, fmt.Errorf("cannot read response size: %v", err)
 	}
 	log.Infof("response size: %v", size)
+	// uint32
+	b.bytesReceived += 4
 
 	// rewind
 	if err := b.c.WriteCharacteristic(b.responseChar, asUint32Size(0), false); err != nil {
 		return nil, fmt.Errorf("cannot rewind: %v", err)
 	}
+	// uint32
+	b.bytesSent += 4
+
 	log.Tracef("rewind done")
 	data := make([]byte, 0, size)
 	got := uint32(0)
@@ -412,6 +442,9 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cannot read characteristic: %v", err)
 		}
+		// current data read
+		b.bytesReceived += uint(len(currentData))
+
 		data = append(data, currentData...)
 		log.Tracef("got %v bytes", len(currentData))
 		// XXX: do we need this?
@@ -419,6 +452,8 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("cannot read chunk: %v", err)
 		}
+		// uint32
+		b.bytesReceived += 4
 		log.Tracef("chunk offset: %v", chunkOffset)
 
 		got += uint32(len(currentData))
@@ -439,6 +474,8 @@ func (b *bleConfiguratorTransport) Receive() ([]byte, error) {
 func (b *bleConfiguratorTransport) processErrorState() error {
 	// XXX: will this be truncated?
 	data, err := b.c.ReadDescriptor(b.errorDesc)
+	// stats
+	b.bytesReceived += uint(len(data))
 	if err != nil {
 		return fmt.Errorf("cannot read error descriptor: %v", err)
 	}
@@ -484,4 +521,12 @@ forLoop:
 		return b.processErrorState()
 	}
 	return nil
+}
+
+func (b *bleConfiguratorTransport) Stats() Stats {
+	return Stats{
+		BytesSent:     b.bytesSent,
+		BytesReceived: b.bytesReceived,
+		Notifications: b.notificationsReceived,
+	}
 }
