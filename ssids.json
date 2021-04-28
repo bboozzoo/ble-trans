@@ -2,63 +2,49 @@
   {
     "bssid": "B0:4E:26:B0:A3:2E",
     "ssid": "WXYNA",
-    "mode": "Infra",
     "channel": "6",
-    "rate": "195 Mbit/s",
     "signal": "95",
     "security": "WPA2"
   },
   {
     "bssid": "B2:4E:26:B0:A3:2E",
     "ssid": "Tracking",
-    "mode": "Infra",
     "channel": "6",
-    "rate": "195 Mbit/s",
     "signal": "94",
     "security": "WPA2"
   },
   {
     "bssid": "94:83:C4:06:3D:A0",
     "ssid": "WXYNA",
-    "mode": "Infra",
     "channel": "6",
-    "rate": "270 Mbit/s",
     "signal": "67",
     "security": "WPA2"
   },
   {
     "bssid": "96:83:C4:06:3D:A0",
     "ssid": "Tracking-2",
-    "mode": "Infra",
     "channel": "6",
-    "rate": "270 Mbit/s",
     "signal": "67",
     "security": "WPA2"
   },
   {
     "bssid": "94:83:C4:06:3D:A1",
     "ssid": "WXYNA",
-    "mode": "Infra",
     "channel": "36",
-    "rate": "135 Mbit/s",
     "signal": "54",
     "security": "WPA2"
   },
   {
     "bssid": "5C:49:79:36:1A:86",
     "ssid": "WXYNA",
-    "mode": "Infra",
     "channel": "1",
-    "rate": "195 Mbit/s",
     "signal": "52",
     "security": "WPA2"
   },
   {
     "bssid": "9C:D8:63:4D:BC:EC",
     "ssid": "8XXXA_242-724943",
-    "mode": "Infra",
     "channel": "1",
-    "rate": "135 Mbit/s",
     "signal": "52",
     "security": "WPA2"
   }

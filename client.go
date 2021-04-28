@@ -238,7 +238,7 @@ func runConfigurator(addr string, scenario string, MTU int) error {
 		return fmt.Errorf("cannot configure: %v", err)
 	}
 	end := time.Now()
-	log.Infof("device configured")
+	log.Infof("started device onboard")
 	stats := ct.Stats()
 	log.Infof("bytes sent:             %v", stats.BytesSent)
 	log.Infof("bytes received:         %v", stats.BytesReceived)

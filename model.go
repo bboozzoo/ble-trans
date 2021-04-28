@@ -209,12 +209,12 @@ func (c *configurator) scenario1() error {
 	}
 	log.Infof("secure session established")
 
-	log.Infof("device data:\n%s", prettyJson(d))
+	log.Infof("received device <ready>:\n%s", prettyJson(d))
 
 	cfgData := map[string]interface{}{
 		"wifi.list-ssids": true,
 	}
-	log.Infof("send cfg:\n%s", prettyJson(cfgData))
+	log.Infof("send <cfg>:\n%s", prettyJson(cfgData))
 	cfgMsg, err := c.cfg.Cfg(cfgData)
 	if err != nil {
 		return fmt.Errorf("cannot generate 'cfg' message: %v", err)
@@ -241,7 +241,7 @@ func (c *configurator) scenario1() error {
 	if err != nil {
 		return fmt.Errorf("cannot process 'reply' message: %v", err)
 	}
-	log.Infof("device reply:\n%s", prettyJson(reply))
+	log.Infof("received device <reply>:\n%s", prettyJson(reply))
 
 	wifiNet, err := extractFirstNetwork(reply["wifi.ssids"])
 	if err != nil {
@@ -259,7 +259,7 @@ func (c *configurator) scenario1() error {
 		"core.onboard":   struct{}{},
 		"wifi.configure": wifiNet,
 	}
-	log.Infof("send cfg:\n%s", prettyJson(cfgData))
+	log.Infof("send <cfg>:\n%s", prettyJson(cfgData))
 	cfgMsg, err = c.cfg.Cfg(cfgData)
 	if err != nil {
 		return fmt.Errorf("cannot generate 'cfg' message: %v", err)
@@ -292,7 +292,7 @@ func (c *configurator) scenario2() error {
 	}
 	log.Infof("secure session established")
 
-	log.Infof("device data:\n%s", prettyJson(d))
+	log.Infof("received device <ready>:\n%s", prettyJson(d))
 	wifiNet, err := extractFirstNetwork(d["wifi.ssids"])
 	if err != nil {
 		return fmt.Errorf("cannot extract wifi network")
@@ -302,7 +302,7 @@ func (c *configurator) scenario2() error {
 		"core.onboard":   struct{}{},
 		"wifi.configure": wifiNet,
 	}
-	log.Infof("send cfg:\n%s", prettyJson(cfgData))
+	log.Infof("send <cfg>:\n%s", prettyJson(cfgData))
 
 	cfgMsg, err := c.cfg.Cfg(cfgData)
 	if err != nil {
