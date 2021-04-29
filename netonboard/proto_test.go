@@ -25,7 +25,7 @@ import (
 
 	. "gopkg.in/check.v1"
 
-	"github.com/snapcore/snapd/netonboard"
+	"github.com/mvo5/ble-trans/netonboard"
 )
 
 func Test(t *testing.T) { TestingT(t) }
