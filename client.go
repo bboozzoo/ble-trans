@@ -227,6 +227,8 @@ func sendData(cln ble.Client, mtu int, data []byte) (bytesSent, bytesRead uint, 
 }
 
 func runConfigurator(addr string, scenario string, MTU int) error {
+	addr = strings.ToLower(addr)
+
 	ct := newConfiguratorTransport()
 	ct.mtu = uint(MTU)
 	cfg, err := NewConfiguratorFor(addr, ct)
